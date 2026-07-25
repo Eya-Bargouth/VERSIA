@@ -1,0 +1,63 @@
+openapi: "3.0.3"
+info:
+  title: Sample Trading API
+  version: "1.0.0"
+  description: API de test pour TRADE Phase 1
+
+paths:
+  /v1/orders:
+    post:
+      summary: Create a new order
+      description: Creates a buy or sell order on the exchange.
+      tags:
+        - Orders
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Trading pair symbol (e.g., BTCUSDT)
+        - name: side
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [buy, sell]
+          description: Order side
+        - name: quantity
+          in: query
+          required: true
+          schema:
+            type: number
+          description: Quantity to trade
+      responses:
+        "200":
+          description: Order created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orderId:
+                    type: string
+                  status:
+                    type: string
+        "400":
+          description: Invalid request parameters
+    get:
+      summary: List all orders
+      tags:
+        - Orders
+      responses:
+        "200":
+          description: List of orders
+
+  /v1/account:
+    get:
+      summary: Get account information
+      tags:
+        - Account
+      responses:
+        "200":
+          description: Account details

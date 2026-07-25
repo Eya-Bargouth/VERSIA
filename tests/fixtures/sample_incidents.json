@@ -1,0 +1,40 @@
+[
+  {
+    "id": "inc-001",
+    "title": "API Latency Spike",
+    "status": "resolved",
+    "severity": "high",
+    "created_at": "2024-01-15T09:00:00Z",
+    "resolved_at": "2024-01-15T11:30:00Z",
+    "updates": [
+      {"timestamp": "2024-01-15T09:00:00Z", "message": "Investigating elevated latency on /v1/orders"},
+      {"timestamp": "2024-01-15T09:45:00Z", "message": "Identified database connection pool exhaustion"},
+      {"timestamp": "2024-01-15T11:30:00Z", "message": "Resolved — connection pool expanded"}
+    ],
+    "timeline": [
+      {"event": "alert_fired", "timestamp": "2024-01-15T09:00:00Z"},
+      {"event": "investigation_started", "timestamp": "2024-01-15T09:05:00Z"},
+      {"event": "root_cause_identified", "timestamp": "2024-01-15T09:45:00Z"},
+      {"event": "mitigation_applied", "timestamp": "2024-01-15T10:00:00Z"},
+      {"event": "resolved", "timestamp": "2024-01-15T11:30:00Z"}
+    ]
+  },
+  {
+    "id": "inc-002",
+    "title": "Partial Outage — Market Data Feed",
+    "status": "resolved",
+    "severity": "critical",
+    "created_at": "2024-02-03T14:00:00Z",
+    "resolved_at": "2024-02-03T15:15:00Z",
+    "updates": [
+      {"timestamp": "2024-02-03T14:00:00Z", "message": "Market data feed delayed for EUR pairs"},
+      {"timestamp": "2024-02-03T14:30:00Z", "message": "Failover to secondary feed initiated"},
+      {"timestamp": "2024-02-03T15:15:00Z", "message": "Primary feed restored, all systems nominal"}
+    ],
+    "timeline": [
+      {"event": "degradation_detected", "timestamp": "2024-02-03T14:00:00Z"},
+      {"event": "failover_triggered", "timestamp": "2024-02-03T14:30:00Z"},
+      {"event": "restored", "timestamp": "2024-02-03T15:15:00Z"}
+    ]
+  }
+]
