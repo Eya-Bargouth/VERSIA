@@ -1,0 +1,27 @@
+manifest_version: "1.0.0"
+source_id: stripe_specs
+parser: yaml_structured
+scope:
+  include:
+    - "spec3-*.yaml"
+  exclude: []
+chunking_policy:
+  semantic_unit: api_endpoint
+  include_parent_context: true
+  include_parameters: true
+  include_responses: true
+  reformulate_natural: true
+versioning:
+  strategy: filename_pattern
+  pattern: 'spec3-(?P<version>.+)\.yaml'
+  order:
+    - legacy
+    - v2213
+    - v2293
+    - v2323
+validity:
+  valid_from: "2024-01-01"
+  status: active
+rationale: "4 versions Stripe pour détection de conflits"
+approved_by: trade-team
+approved_date: "2026-07-15"

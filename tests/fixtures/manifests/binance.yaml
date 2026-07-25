@@ -1,0 +1,16 @@
+manifest_version: "1.0.0"
+source_id: binance_spot
+parser: yaml_structured
+scope:
+  include:
+    - "spot_api.yaml"
+chunking_policy:
+  semantic_unit: api_endpoint
+  include_parameters: true
+  include_responses: true
+  reformulate_natural: true
+validity:
+  status: active
+rationale: "API Binance pour tests cross-source"
+approved_by: trade-team
+approved_date: "2026-07-15"

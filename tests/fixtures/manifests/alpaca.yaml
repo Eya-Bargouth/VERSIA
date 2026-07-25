@@ -1,0 +1,17 @@
+manifest_version: "1.0.0"
+source_id: alpaca_incidents
+parser: json
+scope:
+  include:
+    - "incidents.json"
+chunking_policy:
+  semantic_unit: document
+  group_nested:
+    - "updates"
+    - "timeline"
+  include_parent_context: true
+validity:
+  status: active
+rationale: "Incidents Alpaca pour tests status page"
+approved_by: trade-team
+approved_date: "2026-07-15"
