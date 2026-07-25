@@ -1,0 +1,65 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: trade-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:6333/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: trade-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 15s
+      timeout: 10s
+      retries: 15
+      start_period: 60s
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    container_name: trade-api
+    ports:
+      - "8000:8000"
+    environment:
+      - QDRANT_HOST=trade-qdrant
+      - QDRANT_PORT=6333
+      - LLM_BASE_URL=http://trade-ollama:11434
+      - LLM_PROVIDER=ollama
+      - LLM_MODEL=mistral:7b
+      - QDRANT_COLLECTION_NAME=trade_chunks
+      - EMBEDDING_MODEL=BAAI/bge-m3
+      - RERANKER_MODEL=BAAI/bge-reranker-v2-m3
+      - CHUNK_CONTEXTUAL_PREFIX_MAX_TOKENS=100
+      - RAW_DATA_DIR=./raw
+      - MANIFEST_DIR=./tests/fixtures/manifests
+      - LOG_LEVEL=INFO
+      - LOG_FORMAT=json
+    depends_on:
+      - qdrant
+      - ollama
+    volumes:
+      - ../src:/app/src:ro
+      - ../tests:/app/tests:ro
+    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  qdrant_storage:
+  ollama_data:
