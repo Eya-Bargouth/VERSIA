@@ -1,0 +1,1 @@
+"""Module ingestion — pipeline, chunking, métadonnées, diff."""
