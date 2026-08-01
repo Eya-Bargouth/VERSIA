@@ -2,6 +2,7 @@ manifest_version: "1.0.0"
 source_id: gdpr_regulation
 parser: docling
 scope:
+  base_dir: "regulation"
   include:
     - "gdpr-full.pdf"
 chunking_policy:
