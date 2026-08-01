@@ -16,9 +16,10 @@ class TestBGEEmbedderMocked:
         fake_sparse = [{1: 0.5}, {2: 0.3}]
 
         def fake_encode(sentences, **kwargs):
-            if kwargs.get("output_value") == "sparse":
-                return fake_sparse
-            return fake_dense
+            return {
+                "dense_vecs": fake_dense,
+                "lexical_weights": fake_sparse,
+            }
 
         embedder._model = type("FakeModel", (), {"encode": staticmethod(fake_encode)})()
         embedder._load_model = lambda: None
@@ -33,9 +34,10 @@ class TestBGEEmbedderMocked:
         fake_sparse = [{1: 0.5}]
 
         def fake_encode(sentences, **kwargs):
-            if kwargs.get("output_value") == "sparse":
-                return fake_sparse
-            return fake_dense
+            return {
+                "dense_vecs": fake_dense,
+                "lexical_weights": fake_sparse,
+            }
 
         embedder._model = type("FakeModel", (), {"encode": staticmethod(fake_encode)})()
         embedder._load_model = lambda: None
