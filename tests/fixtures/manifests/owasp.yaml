@@ -2,9 +2,10 @@ manifest_version: "1.0.0"
 source_id: owasp_cheatsheets
 parser: markdown
 scope:
+  base_dir: "security/owasp-cheatsheets"
   include:
     - "Authentication_Cheat_Sheet.md"
-    - "API_Security_Cheat_Sheet.md"
+    - "REST_Security_Cheat_Sheet.md"
     - "Input_Validation_Cheat_Sheet.md"
   exclude:
     - "Automotive_*"
@@ -14,6 +15,6 @@ chunking_policy:
   group_by_heading: true
 validity:
   status: active
-rationale: "OWASP pour tests sécurité"
+rationale: "OWASP cheatsheets pour tests sécurité"
 approved_by: security-committee
 approved_date: "2026-07-15"
