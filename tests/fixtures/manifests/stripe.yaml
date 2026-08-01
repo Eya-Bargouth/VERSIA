@@ -2,6 +2,7 @@ manifest_version: "1.0.0"
 source_id: stripe_specs
 parser: yaml_structured
 scope:
+  base_dir: "specs-api/stripe"
   include:
     - "spec3-*.yaml"
   exclude: []
@@ -22,6 +23,6 @@ versioning:
 validity:
   valid_from: "2024-01-01"
   status: active
-rationale: "4 versions Stripe pour détection de conflits"
+rationale: "4 versions Stripe pour détection de conflits de versions"
 approved_by: trade-team
 approved_date: "2026-07-15"
