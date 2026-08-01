@@ -2,6 +2,7 @@ manifest_version: "1.0.0"
 source_id: alpaca_incidents
 parser: json
 scope:
+  base_dir: "status-pages/alpaca"
   include:
     - "incidents.json"
 chunking_policy:
