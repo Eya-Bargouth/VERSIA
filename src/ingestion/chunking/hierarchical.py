@@ -47,7 +47,7 @@ class HierarchicalChunker(ChunkingStrategy):
         self.prefix_method = prefix_method
         self.max_prefix_tokens = max_prefix_tokens
 
-    def chunk(self, tree: DocumentTree, policy: ChunkingPolicy) -> list[Chunk]:
+    def chunk(self, tree: DocumentTree, policy: ChunkingPolicy, source_type: str = "unknown") -> list[Chunk]:
         """Orchestre le chunking hiérarchique complet."""
         chunks: list[Chunk] = []
         chunk_map: dict[str, Chunk] = {}  # mapping node_id -> chunk pour liens parent/enfant
@@ -58,12 +58,12 @@ class HierarchicalChunker(ChunkingStrategy):
 
         # 2. Créer un chunk par nœud feuille
         for node in leaf_nodes:
-            chunk = self._create_leaf_chunk(tree, node, policy)
+            chunk = self._create_leaf_chunk(tree, node, policy, source_type)
             chunks.append(chunk)
             chunk_map[str(node.id)] = chunk
 
         # 3. Créer les chunks parents structurels (SECTION, API_SCHEMA, etc.)
-        structural_chunks = self._create_structural_chunks(tree, leaf_nodes, chunk_map, policy)
+        structural_chunks = self._create_structural_chunks(tree, leaf_nodes, chunk_map, policy, source_type)
         chunks.extend(structural_chunks)
 
         # 4. Lier la hiérarchie parent/enfant entre chunks
@@ -101,7 +101,7 @@ class HierarchicalChunker(ChunkingStrategy):
         candidates.sort(key=lambda n: (n.page_num or 0, n.line_num or 0, str(n.id)))
         return candidates
 
-    def _create_leaf_chunk(self, tree: DocumentTree, node: DOMNode, policy: ChunkingPolicy) -> Chunk:
+    def _create_leaf_chunk(self, tree: DocumentTree, node: DOMNode, policy: ChunkingPolicy, source_type: str) -> Chunk:
         """Crée un chunk feuille avec contextual_prefix."""
         raw_text = node.markdown or node.text or ""
         hierarchy_path = build_hierarchy_path(tree, node.id)
@@ -115,7 +115,7 @@ class HierarchicalChunker(ChunkingStrategy):
         text = f"{prefix}\n\n{raw_text}" if prefix else raw_text
 
         metadata = ChunkMetadata(
-            source_type="unknown",  # sera surchargé par le pipeline si besoin
+            source_type=source_type,
             source_id=node.source_id,
             node_type=node.type,
             hierarchy_path=hierarchy_path,
@@ -190,6 +190,7 @@ class HierarchicalChunker(ChunkingStrategy):
             leaf_nodes: list[DOMNode],
             chunk_map: dict[str, Chunk],
             policy: ChunkingPolicy,
+            source_type: str,
     ) -> list[Chunk]:
         """Crée des chunks parents pour les nœuds structurels (SECTION, API_SCHEMA, etc.)."""
         structural_ids = {str(n.id) for n in leaf_nodes}
@@ -208,7 +209,7 @@ class HierarchicalChunker(ChunkingStrategy):
             hierarchy_path = build_hierarchy_path(tree, node.id)
             raw_text = node.markdown or node.text or ""
             metadata = ChunkMetadata(
-                source_type="unknown",
+                source_type=source_type,
                 source_id=node.source_id,
                 node_type=node.type,
                 hierarchy_path=hierarchy_path,
