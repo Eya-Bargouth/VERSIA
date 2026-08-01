@@ -27,6 +27,7 @@ dependencies = [
     "pdfplumber>=0.11.0",
     "unstructured>=0.14.0",
     "numpy>=1.26.0",
+    "FlagEmbedding>=1.2.0",
 ]
 
 [project.optional-dependencies]
@@ -36,6 +37,7 @@ dev = ["black", "ruff", "mypy"]
 where = ["src"]
 
 [tool.pytest.ini_options]
+addopts = "-m 'not slow'"
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
@@ -46,6 +48,7 @@ markers = [
     "phase4: Phase 4 tests",
     "phase5: Phase 5 tests",
     "phase6: Phase 6 tests",
+    "slow: slow tests requiring real models and external services (excluded by default)",
 ]
 
 [tool.black]

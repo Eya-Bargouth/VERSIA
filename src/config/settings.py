@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     embedding_backend: Literal["torch", "onnx"] = "torch"
     embedding_batch_size: int = 32
     embedding_device: str = "cuda"
+    embedding_use_fp16: bool = True
 
     # Reranker
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
@@ -52,6 +53,7 @@ class Settings(BaseSettings):
     # Paths
     raw_data_dir: Path = Path("./raw")
     manifest_dir: Path = Path("./tests/fixtures/manifests")
+    cache_dir: Path = Path("./data/cache")
 
     # Logging
     log_level: str = "INFO"

@@ -43,6 +43,7 @@ class SourceManifest(BaseModel):
 
     manifest_version: str = "1.0.0"
     source_id: str = Field(..., min_length=1, pattern=r"^[a-zA-Z0-9_]+$")
+    source_type: str = "document"  # libre, jamais un enum figé (ex: "api_spec", "regulation")
     parser: Literal["docling", "yaml_structured", "markdown", "json"]
     scope: dict[str, Any] = Field(default_factory=dict)
     chunking_policy: ChunkingPolicy = Field(default_factory=lambda: ChunkingPolicy(semantic_unit="paragraph"))
