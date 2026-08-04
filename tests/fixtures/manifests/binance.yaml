@@ -1,5 +1,7 @@
 manifest_version: "1.0.0"
 source_id: binance_spot
+query_aliases:
+  - binance
 parser: yaml_structured
 scope:
   base_dir: "specs-api/binance"

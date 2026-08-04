@@ -1,5 +1,7 @@
 manifest_version: "1.0.0"
 source_id: alpaca_incidents
+query_aliases:
+  - alpaca
 parser: json
 scope:
   base_dir: "status-pages/alpaca"

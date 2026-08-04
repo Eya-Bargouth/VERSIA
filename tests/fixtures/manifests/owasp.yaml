@@ -1,5 +1,8 @@
 manifest_version: "1.0.0"
 source_id: owasp_cheatsheets
+query_aliases:
+  - owasp
+  - security
 parser: markdown
 scope:
   base_dir: "security/owasp-cheatsheets"

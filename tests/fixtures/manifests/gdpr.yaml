@@ -1,5 +1,7 @@
 manifest_version: "1.0.0"
 source_id: gdpr_regulation
+query_aliases:
+  - gdpr
 parser: docling
 scope:
   base_dir: "regulation"

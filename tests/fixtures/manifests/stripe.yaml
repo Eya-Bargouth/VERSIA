@@ -1,5 +1,7 @@
 manifest_version: "1.0.0"
 source_id: stripe_specs
+query_aliases:
+  - stripe
 parser: yaml_structured
 scope:
   base_dir: "specs-api/stripe"
