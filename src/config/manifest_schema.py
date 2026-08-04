@@ -46,6 +46,10 @@ class SourceManifest(BaseModel):
     source_type: str = "document"  # libre, jamais un enum figé (ex: "api_spec", "regulation")
     parser: Literal["docling", "yaml_structured", "markdown", "json"]
     scope: dict[str, Any] = Field(default_factory=dict)
+    # Mots-clés optionnels pour la détection de source_id au moment de la requête
+    # (QueryPlanner). Purement déclaratif : aucun nom de corpus n'est jamais
+    # codé en dur dans src/, seulement lu depuis les manifestes découverts.
+    query_aliases: list[str] = Field(default_factory=list)
     chunking_policy: ChunkingPolicy = Field(default_factory=lambda: ChunkingPolicy(semantic_unit="paragraph"))
     versioning: VersioningConfig = Field(default_factory=VersioningConfig)
     validity: ValidityConfig = Field(default_factory=ValidityConfig)
