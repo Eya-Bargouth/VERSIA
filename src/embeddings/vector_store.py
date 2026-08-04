@@ -73,6 +73,7 @@ class QdrantStore:
                 "source_id": chunk.source_id,
                 "source_type": chunk.metadata.source_type,
                 "text": chunk.text,
+                "raw_text": chunk.raw_text,
                 "hierarchy_path": chunk.hierarchy_path,
                 "version_tag": chunk.version_tag,
                 "version_order": chunk.version_order,
@@ -108,11 +109,11 @@ class QdrantStore:
     def search_dense(
         self,
         query_embedding: np.ndarray,
-        filter_dict: dict | None = None,
+        filter: dict | None = None,
         k: int = 10,
     ) -> list[RetrievalResult]:
         """Recherche dense par similarité cosinus."""
-        qdrant_filter = self._build_filter(filter_dict) if filter_dict else None
+        qdrant_filter = self._build_filter(filter) if filter else None
         results = self._execute_search(
             query_vector=query_embedding.tolist(),
             vector_name="dense",
@@ -121,7 +122,7 @@ class QdrantStore:
         )
         return [
             RetrievalResult(
-                chunk_id=UUID(r.payload.get("chunk_id", r.id)),
+                chunk_id=UUID(r.payload.get("chunk_id", str(r.id))),
                 score=r.score,
                 source="dense",
                 payload=r.payload,
@@ -132,11 +133,11 @@ class QdrantStore:
     def search_sparse(
         self,
         query_sparse: dict[int, float],
-        filter_dict: dict | None = None,
+        filter: dict | None = None,
         k: int = 10,
     ) -> list[RetrievalResult]:
         """Recherche sparse (SPLADE)."""
-        qdrant_filter = self._build_filter(filter_dict) if filter_dict else None
+        qdrant_filter = self._build_filter(filter) if filter else None
         sparse_vector = SparseVector(
             indices=list(query_sparse.keys()),
             values=list(query_sparse.values()),
@@ -149,7 +150,7 @@ class QdrantStore:
         )
         return [
             RetrievalResult(
-                chunk_id=UUID(r.payload.get("chunk_id", r.id)),
+                chunk_id=UUID(r.payload.get("chunk_id", str(r.id))),
                 score=r.score,
                 source="sparse",
                 payload=r.payload,
@@ -198,7 +199,38 @@ class QdrantStore:
 
     @staticmethod
     def _build_filter(filter_dict: dict) -> Filter | None:
-        """Construit un Filter Qdrant depuis un dict simple."""
+        """Construit un Filter Qdrant depuis un dict.
+
+        Accepte deux formats :
+        1. Plat (legacy)  : {"source_id": "stripe_specs"}
+        2. Qdrant-style   : {"key": "source_id", "match": {"value": "stripe_specs"}}
+        3. Combiné (must) : {"must": [{"key": ..., "match": ...}, ...]}
+        """
+        if not filter_dict:
+            return None
+
+        # Format 3 — already a must-dict
+        if "must" in filter_dict:
+            conditions = []
+            for cond in filter_dict["must"]:
+                if "key" in cond and "match" in cond:
+                    conditions.append(
+                        FieldCondition(key=cond["key"], match=MatchValue(value=cond["match"]["value"]))
+                    )
+            return Filter(must=conditions) if conditions else None
+
+        # Format 2 — single Qdrant-style condition
+        if "key" in filter_dict and "match" in filter_dict:
+            return Filter(
+                must=[
+                    FieldCondition(
+                        key=filter_dict["key"],
+                        match=MatchValue(value=filter_dict["match"]["value"]),
+                    )
+                ]
+            )
+
+        # Format 1 — flat key:value
         must_conditions = []
         for key, value in filter_dict.items():
             if isinstance(value, dict) and "match" in value:
