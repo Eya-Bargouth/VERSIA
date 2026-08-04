@@ -3,6 +3,10 @@
 
 manifest_version: "1.0.0"
 source_id: <identifiant_unique_snake_case>
+# Mots-clés optionnels utilisés par le QueryPlanner pour détecter cette source
+# à partir d'une requête utilisateur (ex: "stripe" -> source_id=stripe_specs).
+# Facultatif — laisser vide si aucune détection par mot-clé n'est souhaitée.
+query_aliases: []
 parser: <docling|yaml_structured|markdown|json>
 
 scope:
