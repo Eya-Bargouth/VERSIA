@@ -104,7 +104,9 @@ class TestRealPipeline:
             f"Collection '{collection_name}' vide ({collection_info.points_count} points)"
         
         # 2. Récupérer des chunks et vérifier les vecteurs
-        points, _ = client.scroll(collection_name=collection_name, limit=10, with_payload=True)
+        points, _ = client.scroll(
+            collection_name=collection_name, limit=10, with_payload=True, with_vectors=True
+        )
         assert len(points) > 0, "Aucun chunk trouvé"
         
         first_point = points[0]
