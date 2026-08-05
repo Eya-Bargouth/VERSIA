@@ -27,7 +27,7 @@ class Settings(BaseSettings):
 
     # LLM
     llm_provider: Literal["ollama", "vllm"] = "ollama"
-    llm_model: str = "mistral:7b"
+    llm_model: str = "qwen3:4b"
     llm_base_url: str = "http://localhost:11434"
     llm_temperature: float = 0.1
     llm_max_tokens: int = 2048
