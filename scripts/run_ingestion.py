@@ -19,6 +19,9 @@ from src.config.settings import Settings, get_settings
 from src.embeddings.bge_m3 import BGEEmbedder
 from src.embeddings.vector_store import QdrantStore
 from src.ingestion.pipeline import run_ingestion
+from src.llm.factory import LLMFactory
+from src.llm.interface import LLMConfig
+from src.llm.providers import ollama_client, vllm_client  # noqa: F401 — self-register with LLMFactory
 from qdrant_client import QdrantClient
 
 logger = structlog.get_logger(__name__)
@@ -30,6 +33,18 @@ def main():
     parser.add_argument("--raw-dir", type=Path, required=True, help="Répertoire du corpus raw/")
     parser.add_argument("--source-id", type=str, default=None, help="Ingestion d'une seule source")
     parser.add_argument("--qdrant-url", type=str, default=None, help="URL Qdrant (override)")
+    parser.add_argument(
+        "--prefix-method",
+        type=str,
+        choices=["deterministic", "llm"],
+        default="deterministic",
+        help=(
+            "Méthode de génération du préfixe contextuel (Contextual Retrieval). "
+            "'deterministic' (défaut, rapide, reproductible, sans coût GPU/LLM) "
+            "ou 'llm' (résumé via le provider configuré dans .env, avec repli "
+            "automatique sur 'deterministic' en cas d'échec)."
+        ),
+    )
     args = parser.parse_args()
 
     settings = get_settings()
@@ -48,12 +63,28 @@ def main():
         batch_size=settings.embedding_batch_size,
     )
 
+    llm_client = None
+    llm_config = None
+    if args.prefix_method == "llm":
+        llm_config = LLMConfig(
+            provider=settings.llm_provider,
+            model=settings.llm_model,
+            base_url=settings.llm_base_url,
+            temperature=settings.llm_temperature,
+            max_tokens=settings.llm_max_tokens,
+            timeout=settings.llm_timeout,
+        )
+        llm_client = LLMFactory.create(llm_config)
+
     report = run_ingestion(
         manifest_dir=args.manifest_dir,
         raw_dir=args.raw_dir,
         store=store,
         embedder=embedder,
         source_id_filter=args.source_id,
+        prefix_method=args.prefix_method,
+        llm_client=llm_client,
+        llm_config=llm_config,
     )
 
     print("\n=== Ingestion Report ===")
