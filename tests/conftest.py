@@ -60,7 +60,7 @@ def settings() -> Settings:
         qdrant_host="localhost",
         qdrant_port=6333,
         llm_provider="ollama",
-        llm_model="mistral:7b",
+        llm_model="qwen3:4b",
         llm_base_url="http://localhost:11434",
     )
 
@@ -97,7 +97,7 @@ def mock_llm_client():
 
 @pytest.fixture
 def ollama_config() -> LLMConfig:
-    return LLMConfig(provider="ollama", model="mistral:7b", base_url="http://localhost:11434")
+    return LLMConfig(provider="ollama", model="qwen3:4b", base_url="http://localhost:11434")
 
 
 @pytest.fixture
