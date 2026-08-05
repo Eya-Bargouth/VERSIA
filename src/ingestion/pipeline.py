@@ -66,8 +66,22 @@ def run_ingestion(
     embedder,
     source_id_filter: str | None = None,
     file_filter: str | None = None,
+    prefix_method: str = "deterministic",
+    llm_client=None,
+    llm_config=None,
 ) -> IngestionReport:
-    """Pipeline complet d'ingestion."""
+    """Pipeline complet d'ingestion.
+
+    Args:
+        prefix_method: "deterministic" (défaut — titres ancêtres tronqués, pas
+            d'appel LLM) ou "llm" (résumé du contexte parent via *llm_client*,
+            avec repli automatique sur le déterministe en cas d'échec — voir
+            HierarchicalChunker). Le défaut reste déterministe pour des raisons
+            de reproductibilité, de vitesse d'ingestion (des milliers de chunks)
+            et de sobriété mémoire GPU (voir CLAUDE.md / spec §6).
+        llm_client, llm_config: Requis (tous les deux) si prefix_method="llm" ;
+            ignorés sinon.
+    """
     report = IngestionReport()
     manifests = discover_manifests(manifest_dir)
 
@@ -90,10 +104,13 @@ def run_ingestion(
                     cache_dir.mkdir(parents=True, exist_ok=True)
                     
                     import hashlib
-                    # Calculate cache key including file mtime and chunking policy
+                    # Calculate cache key including file mtime, chunking policy,
+                    # and the contextual-prefix method (deterministic vs llm
+                    # produce different chunk text, so they must not share a
+                    # cache entry).
                     mtime = file_path.stat().st_mtime
                     policy_json = manifest.chunking_policy.model_dump_json()
-                    key_str = f"{file_path}_{mtime}_{policy_json}"
+                    key_str = f"{file_path}_{mtime}_{policy_json}_{prefix_method}"
                     cache_key = hashlib.sha256(key_str.encode()).hexdigest()
                     cache_file = cache_dir / f"{file_path.name}_{cache_key}.json"
 
@@ -114,10 +131,13 @@ def run_ingestion(
                         tree = builder.build(str(file_path), manifest)
                         tree.compute_all_hashes()
 
-                        logger.info("chunking_file", file=str(file_path))
+                        logger.info("chunking_file", file=str(file_path), prefix_method=prefix_method)
+                        use_llm = prefix_method == "llm"
                         chunker = HierarchicalChunker(
-                            prefix_method="deterministic",
-                            max_prefix_tokens=100,
+                            llm_client=llm_client if use_llm else None,
+                            llm_config=llm_config if use_llm else None,
+                            prefix_method=prefix_method,
+                            max_prefix_tokens=settings.chunk_contextual_prefix_max_tokens,
                         )
                         policy = resolve_policy(manifest.chunking_policy)
                         chunks = chunker.chunk(tree, policy, source_type=manifest.source_type)
