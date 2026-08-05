@@ -5,10 +5,18 @@ from __future__ import annotations
 import hashlib
 from datetime import date
 from enum import StrEnum
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, field_validator
+
+if TYPE_CHECKING:
+    # Only for static type checking — importing these at runtime would create
+    # a circular import (src.ingestion.chunking.* already imports from
+    # src.dom.models). See DocumentTree.to_chunks() below.
+    from src.config.manifest_schema import ChunkingPolicy
+    from src.ingestion.chunking.base import ChunkingStrategy
+    from src.ingestion.metadata import Chunk
 
 
 class NodeType(StrEnum):
@@ -186,6 +194,20 @@ class DocumentTree(BaseModel):
     def compute_all_hashes(self) -> None:
         for node in self.nodes.values():
             node.compute_hash()
+
+    def to_chunks(
+        self, strategy: "ChunkingStrategy", policy: "ChunkingPolicy", source_type: str = "unknown"
+    ) -> list["Chunk"]:
+        """Délègue le chunking à *strategy* (contrat spec §12.1/§12.2).
+
+        Thin wrapper kept here for API-contract parity with the spec — the
+        actual chunking logic lives in src/ingestion/chunking/ (e.g.
+        HierarchicalChunker) so that src/dom/ stays decoupled from the
+        ingestion layer (no runtime import of ChunkingStrategy here; see the
+        TYPE_CHECKING guard above). Equivalent to
+        ``strategy.chunk(tree, policy, source_type=source_type)``.
+        """
+        return strategy.chunk(self, policy, source_type=source_type)
 
     def validate_integrity(self) -> list[str]:
         """Retourne une liste d'erreurs si l'arbre est corrompu."""
