@@ -50,7 +50,7 @@ services:
       - QDRANT_PORT=6333
       - LLM_BASE_URL=http://trade-ollama:11434
       - LLM_PROVIDER=ollama
-      - LLM_MODEL=qwen3:4b
+      - LLM_MODEL=qwen2.5:3b-instruct
       - QDRANT_COLLECTION_NAME=trade_chunks
       - EMBEDDING_MODEL=BAAI/bge-m3
       - RERANKER_MODEL=BAAI/bge-reranker-v2-m3
