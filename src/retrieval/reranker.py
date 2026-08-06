@@ -27,7 +27,7 @@ class Reranker:
         model_name: str = "BAAI/bge-reranker-v2-m3",
         use_fp16: bool = True,
         device: str = "auto",
-        batch_size: int = 32,
+        batch_size: int = 64,
     ):
         self.model_name = model_name
         self.use_fp16 = use_fp16
