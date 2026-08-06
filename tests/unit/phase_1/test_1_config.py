@@ -15,7 +15,7 @@ class TestSettings:
         assert s.qdrant_host == "localhost"
         assert s.qdrant_port == 6333
         assert s.llm_provider == "ollama"
-        assert s.llm_model == "qwen3:4b"
+        assert s.llm_model == "qwen2.5:3b-instruct"
 
     def test_settings_from_env(self, monkeypatch):
         monkeypatch.setenv("QDRANT_HOST", "qdrant.test")
