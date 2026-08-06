@@ -1,14 +1,14 @@
 """Client LLM pour Ollama via HTTPX."""
 
-import logging
 from typing import AsyncIterator
 
 import httpx
+import structlog
 
 from src.llm.factory import LLMFactory
 from src.llm.interface import BaseLLMClient, LLMConfig, LLMMessage, LLMResponse, LLMUsage
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class OllamaClient(BaseLLMClient):
@@ -20,6 +20,14 @@ class OllamaClient(BaseLLMClient):
             "model": config.model,
             "messages": self._build_messages_payload(messages),
             "stream": False,
+            "keep_alive": "30m",  # avoid reloading the model between successive calls/runs
+            # No explicit "think" field: Ollama rejects it outright (400) for
+            # models without thinking capability (e.g. qwen2.5:7b-instruct —
+            # confirmed: "does not support thinking"), and its default
+            # behavior for models that DO support it (e.g. Qwen3) already
+            # separates reasoning into message.thinking, keeping content
+            # clean. Setting "think": False was tested and is actively worse
+            # for thinking models — see docs/GUIDE_DEBUTANT_RAG.md.
             "options": {
                 "temperature": config.temperature,
                 "num_predict": config.max_tokens,
