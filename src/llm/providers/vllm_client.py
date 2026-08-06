@@ -1,14 +1,14 @@
 """Client LLM pour vLLM via HTTPX (format OpenAI-compatible)."""
 
-import logging
 from typing import AsyncIterator
 
 import httpx
+import structlog
 
 from src.llm.factory import LLMFactory
 from src.llm.interface import BaseLLMClient, LLMConfig, LLMMessage, LLMResponse, LLMUsage
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class VLLMClient(BaseLLMClient):
