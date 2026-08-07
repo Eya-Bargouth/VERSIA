@@ -43,6 +43,11 @@ class LLMConfig(BaseModel):
     timeout: int = 120
     fallback_provider: str | None = None
     fallback_model: str | None = None
+    # JSON schema (ex. SomeModel.model_json_schema()) contraignant la sortie du
+    # LLM. Chaque provider l'adapte à son propre format de payload (voir
+    # OllamaClient/VLLMClient) — l'appelant ne manipule que ce schéma
+    # générique, jamais le format spécifique d'un provider.
+    response_format: dict | None = None
 
 
 class BaseLLMClient(ABC):
