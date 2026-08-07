@@ -121,7 +121,7 @@ def run_ingestion(
                             chunks_data = json.load(f)
                             chunks = [Chunk.model_validate(c) for c in chunks_data]
                     else:
-                        builder = _select_builder(str(file_path))
+                        builder = select_builder(str(file_path))
                         if builder is None:
                             msg = f"No builder supports {file_path}"
                             source_report["errors"].append(msg)
@@ -211,7 +211,7 @@ def _resolve_files(raw_dir: Path, manifest: SourceManifest) -> list[Path]:
     return sorted(files)
 
 
-def _select_builder(file_path: str) -> AbstractDOMBuilder | None:
+def select_builder(file_path: str) -> AbstractDOMBuilder | None:
     """Sélectionne le premier builder compatible."""
     for builder in _BUILDERS:
         if builder.supports(file_path):
