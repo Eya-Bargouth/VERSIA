@@ -254,9 +254,13 @@ class HybridRetriever:
             executor.submit(dense_task)
             executor.submit(sparse_task)
 
-        # If sparse came back empty, return dense results directly (no RRF needed)
+        # If sparse came back empty, return dense results directly (no RRF needed).
+        # Not truncated to top_k here: the caller reranks this pool before its
+        # own final top_k truncation — slicing to top_k this early used to
+        # make `len(candidates) > top_k` (the rerank gate in retrieve()) never
+        # true, silently skipping reranking on every hybrid-strategy query.
         if not sparse_results:
-            return dense_results[:top_k]
+            return dense_results
 
         fused: List[FusedResult] = rrf_fuse(
             [dense_results, sparse_results],
@@ -271,7 +275,7 @@ class HybridRetriever:
                 source="hybrid",
                 payload=f.payload,
             )
-            for f in fused[:top_k]
+            for f in fused
         ]
 
     # ------------------------------------------------------------------
