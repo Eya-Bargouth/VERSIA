@@ -78,6 +78,59 @@ paths:
         assert any(c.change_type == "added" for c in report.changes)
         assert any(c.change_type == "modified" for c in report.changes)
 
+    def test_diff_detects_description_only_change(self, tmp_path):
+        """La description d'un endpoint vit dans `markdown`, jamais dans
+        `metadata` — un changement de description doit apparaître dans
+        field_changes, pas seulement faire varier content_hash en silence."""
+        v1_yaml = tmp_path / "api_v1.yaml"
+        v1_yaml.write_text("""
+openapi: "3.0.3"
+info:
+  title: Test API
+  version: "1.0.0"
+paths:
+  /v1/subscriptions/{id}:
+    delete:
+      summary: Cancel a subscription
+      description: "Prorations are removed if prorate is set to false."
+      responses:
+        "200":
+          description: OK
+""", encoding="utf-8")
+
+        v2_yaml = tmp_path / "api_v2.yaml"
+        v2_yaml.write_text("""
+openapi: "3.0.3"
+info:
+  title: Test API
+  version: "2.0.0"
+paths:
+  /v1/subscriptions/{id}:
+    delete:
+      summary: Cancel a subscription
+      description: "Prorations are removed if prorate is set to true."
+      responses:
+        "200":
+          description: OK
+""", encoding="utf-8")
+
+        manifest = SourceManifest(
+            source_id="test_api",
+            parser="yaml_structured",
+            scope={"include": ["*.yaml"]},
+        )
+        tree_v1 = YAMLBuilder().build(str(v1_yaml), manifest)
+        tree_v2 = YAMLBuilder().build(str(v2_yaml), manifest)
+
+        engine = VersionDiffEngine(diff_dir=tmp_path / "diffs")
+        report = engine.diff(tree_v1, tree_v2)
+
+        modified = [c for c in report.changes if c.change_type == "modified"]
+        assert len(modified) == 1
+        assert "markdown" in modified[0].field_changes
+        assert "false" in modified[0].field_changes["markdown"]["old"]
+        assert "true" in modified[0].field_changes["markdown"]["new"]
+
     def test_load_diff_returns_none_when_missing(self, tmp_path):
         engine = VersionDiffEngine(diff_dir=tmp_path)
         result = engine.load_diff("nonexistent", "v1", "v2")
