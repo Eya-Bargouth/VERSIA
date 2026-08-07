@@ -26,6 +26,15 @@ class VLLMClient(BaseLLMClient):
             "temperature": config.temperature,
             "max_tokens": config.max_tokens,
         }
+        if config.response_format is not None:
+            # Format OpenAI-compatible (structured outputs) — nécessite un
+            # backend vLLM avec guided decoding activé (outlines/xgrammar).
+            # Non exercé contre un vrai serveur vLLM dans cette session (pas
+            # d'instance disponible) : à valider avant usage en prod.
+            payload["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "response", "schema": config.response_format},
+            }
 
         try:
             resp = httpx.post(url, json=payload, headers=headers, timeout=config.timeout)
