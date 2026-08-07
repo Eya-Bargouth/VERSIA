@@ -146,8 +146,13 @@ class VersionDiffEngine:
             if old_meta.get(field) != new_meta.get(field):
                 changes[field] = {"old": old_meta.get(field), "new": new_meta.get(field)}
         # Si le texte/markdown a changé mais pas les métadonnées, le signaler
+        # (la description d'un endpoint/paramètre vit dans markdown, jamais
+        # dans metadata — sans ce check un changement de description ferait
+        # varier content_hash sans qu'aucun field_changes ne l'explique)
         if old.get("text") != new.get("text") and "text" not in changes:
             changes["text"] = {"old": old.get("text"), "new": new.get("text")}
+        if old.get("markdown") != new.get("markdown") and "markdown" not in changes:
+            changes["markdown"] = {"old": old.get("markdown"), "new": new.get("markdown")}
         return changes
 
     def _save(self, report: DiffReport) -> None:
