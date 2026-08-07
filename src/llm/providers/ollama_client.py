@@ -33,6 +33,11 @@ class OllamaClient(BaseLLMClient):
                 "num_predict": config.max_tokens,
             },
         }
+        if config.response_format is not None:
+            # Ollama structured outputs: `format` prend directement le JSON
+            # schema (contrairement à l'API OpenAI-compatible de vLLM, qui
+            # attend un objet {"type": "json_schema", "json_schema": {...}}).
+            payload["format"] = config.response_format
 
         try:
             resp = httpx.post(url, json=payload, timeout=config.timeout)
