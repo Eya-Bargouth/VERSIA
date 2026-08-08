@@ -1,3 +1,56 @@
-"""Generation schemas — Phase 1 (placeholder)."""
+"""Schémas Pydantic de la sortie du générateur (spec §8, §14.6)."""
 
-# TODO: Phase 4 - implementer
+from typing import Literal
+from uuid import UUID
+
+from pydantic import BaseModel, Field
+
+
+class Citation(BaseModel):
+    """Citation formalisée par segment (spec §14.6)."""
+
+    citation_id: str
+    chunk_id: UUID
+    document: str
+    section: str | None = None
+    page: int | None = None
+    line: int | None = None
+    text_span: str
+    support_level: Literal["fully_supported", "partially_supported", "no_support"]
+
+
+class RawCitation(BaseModel):
+    """Citation telle que produite par le LLM — uniquement ce qu'il peut
+    connaître (chunk cité, extrait, niveau de support). `document`, `section`,
+    `page`, `line` et `citation_id` sont remplis ensuite par
+    ``src.generation.citation`` depuis le payload Qdrant déjà connu, plutôt
+    que de faire reproduire ces métadonnées au LLM (risque d'erreur inutile
+    sur des données qu'on possède déjà avec certitude)."""
+
+    chunk_id: UUID
+    text_span: str
+    support_level: Literal["fully_supported", "partially_supported", "no_support"]
+
+
+class RawGenerationOutput(BaseModel):
+    """Schéma exact demandé au LLM via ``LLMConfig.response_format``."""
+
+    answer: str
+    citations: list[RawCitation] = Field(default_factory=list)
+    confidence: float = Field(ge=0.0, le=1.0)
+    sufficiency_score: float = Field(ge=0.0, le=1.0)
+
+
+class GenerationResult(BaseModel):
+    """Sortie structurée du générateur (spec §8 livrables).
+
+    `confidence` et `sufficiency_score` sont auto-évalués par le LLM au moment
+    de la génération (Self-RAG style) — un signal parmi d'autres pour
+    l'AbstentionGate, distinct du SufficiencyChecker qui tourne *avant*
+    génération (spec §8 "Détails Evidence Sufficiency Check").
+    """
+
+    answer: str
+    citations: list[Citation] = Field(default_factory=list)
+    confidence: float = Field(ge=0.0, le=1.0)
+    sufficiency_score: float = Field(ge=0.0, le=1.0)
