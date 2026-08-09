@@ -10,16 +10,13 @@ dur. Ajouter une nouvelle source versionnée ne demande aucune modification de
 ce script, seulement un manifeste avec ``versioning.pattern``/``.order``
 déclarés (voir tests/fixtures/manifests/stripe.yaml pour un exemple).
 
-Aucun builder DOM ne peuple actuellement DOMNode.version_tag depuis
-manifest.versioning (gap pré-existant, même famille que le status=None
-documenté en Phase 3 — voir docs/PHASE_3_SUMMARY.md §6). VersionDiffEngine.diff()
-se rabat alors sur des tags génériques "v1"/"v2" pour toutes les paires, ce qui
-fait collisionner les fichiers de sortie. Ce script contourne le problème
-localement (sans toucher aux builders partagés) en dérivant le tag depuis
-``manifest.versioning.pattern`` appliqué au nom de fichier.
+Les builders DOM peuplent désormais DOMNode.version_tag/version_order depuis
+manifest.versioning au moment du build() (AbstractDOMBuilder._create_root_node,
+corrigé en Phase 4 — voir docs/PHASE_4_SUMMARY.md, Tâche 15) : ce script se
+contente de construire l'arbre et de lire le tag qui en résulte, plus besoin
+de le dériver lui-même.
 """
 import argparse
-import re
 import sys
 from itertools import combinations
 from pathlib import Path
@@ -43,28 +40,16 @@ def _resolve_files(raw_dir: Path, manifest: SourceManifest) -> list[Path]:
     return sorted(files)
 
 
-def _extract_version_tag(file_path: Path, manifest: SourceManifest) -> str:
-    if manifest.versioning.strategy != "filename_pattern" or not manifest.versioning.pattern:
-        raise ValueError(
-            f"manifest {manifest.source_id} n'utilise pas versioning.strategy=filename_pattern "
-            "(seule stratégie supportée par ce script pour l'instant)"
-        )
-    match = re.search(manifest.versioning.pattern, file_path.name)
-    if not match:
-        raise ValueError(f"{file_path.name} ne correspond pas au pattern {manifest.versioning.pattern}")
-    return match.group("version")
-
-
-def _build_tagged_tree(file_path: Path, manifest: SourceManifest, order: list[str]) -> DocumentTree:
+def _build_tagged_tree(file_path: Path, manifest: SourceManifest) -> DocumentTree:
     builder = select_builder(str(file_path))
     if builder is None:
         raise ValueError(f"Aucun builder DOM ne supporte {file_path}")
     tree = builder.build(str(file_path), manifest)
     tree.compute_all_hashes()
-    tag = _extract_version_tag(file_path, manifest)
-    root = tree.nodes[tree.root_id]
-    root.version_tag = tag
-    root.version_order = order.index(tag) if tag in order else None
+    if tree.nodes[tree.root_id].version_tag is None:
+        raise ValueError(
+            f"{file_path.name} : version_tag non résolu — vérifier manifest.versioning.pattern"
+        )
     return tree
 
 
@@ -81,7 +66,7 @@ def process_manifest(manifest: SourceManifest, raw_dir: Path, engine: VersionDif
 
     trees: dict[str, DocumentTree] = {}
     for file_path in files:
-        tree = _build_tagged_tree(file_path, manifest, order)
+        tree = _build_tagged_tree(file_path, manifest)
         tag = tree.nodes[tree.root_id].version_tag
         trees[tag] = tree
         print(f"  parsed {file_path.name} -> version_tag={tag!r} order={tree.nodes[tree.root_id].version_order}")
