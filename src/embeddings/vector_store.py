@@ -71,6 +71,7 @@ class QdrantStore:
 
             payload = {
                 "source_id": chunk.source_id,
+                "source_path": chunk.metadata.source_path,
                 "source_type": chunk.metadata.source_type,
                 "text": chunk.text,
                 "raw_text": chunk.raw_text,
