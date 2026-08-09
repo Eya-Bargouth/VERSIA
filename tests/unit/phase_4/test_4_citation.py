@@ -11,7 +11,27 @@ pytestmark = pytest.mark.phase4
 
 
 class TestEnrichCitations:
+    def test_prefers_source_path_over_source_id(self):
+        chunk_id = uuid4()
+        chunks = [
+            {
+                "chunk_id": str(chunk_id),
+                "payload": {
+                    "source_id": "stripe_specs",
+                    "source_path": "raw/specs-api/stripe/spec3-v2323.yaml",
+                    "hierarchy_path": "paths./v1/orders.post",
+                },
+            }
+        ]
+        raw = [RawCitation(chunk_id=chunk_id, text_span="symbol is required", support_level="fully_supported")]
+
+        result = enrich_citations(raw, chunks)
+
+        assert result[0].document == "raw/specs-api/stripe/spec3-v2323.yaml"
+
     def test_enriches_from_known_chunk_payload(self):
+        """Repli sur source_id quand source_path est absent (chunks ingérés
+        avant l'ajout de ce champ à ChunkMetadata)."""
         chunk_id = uuid4()
         chunks = [
             {
