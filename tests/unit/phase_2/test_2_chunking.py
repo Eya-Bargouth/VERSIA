@@ -53,6 +53,41 @@ class TestHierarchicalChunking:
         for c1, c2 in zip(chunks1, chunks2):
             assert c1.content_hash == c2.content_hash
 
+    def test_chunks_inherit_version_and_validity_from_tree_root(self, tmp_path):
+        """Un chunk n'a pas ses propres version_tag/status — hérités de la
+        racine de l'arbre (un fichier = une version, une validité), pas
+        None comme avant la correction de ce gap (voir
+        docs/PHASE_4_SUMMARY.md, Tâche 15)."""
+        from src.config.manifest_schema import SourceManifest
+
+        v_path = tmp_path / "spec3-v2293.yaml"
+        v_path.write_text(
+            "openapi: \"3.0.3\"\ninfo:\n  title: X\n  version: \"1.0.0\"\n"
+            "paths:\n  /ping:\n    get:\n      summary: Ping\n",
+            encoding="utf-8",
+        )
+        manifest = SourceManifest(
+            source_id="test_api",
+            parser="yaml_structured",
+            scope={"include": ["*.yaml"]},
+            chunking_policy=ChunkingPolicy(semantic_unit="api_endpoint"),
+            versioning={
+                "strategy": "filename_pattern",
+                "pattern": r"spec3-(?P<version>.+)\.yaml",
+                "order": ["v2213", "v2293"],
+            },
+            validity={"status": "active"},
+        )
+        tree = YAMLBuilder().build(str(v_path), manifest)
+        chunker = HierarchicalChunker(prefix_method="deterministic")
+        chunks = chunker.chunk(tree, manifest.chunking_policy)
+
+        assert chunks
+        for c in chunks:
+            assert c.version_tag == "v2293"
+            assert c.version_order == 1
+            assert c.status == "active"
+
     def test_mock_llm_prefix(self, sample_openapi_path):
         from src.config.manifest_schema import SourceManifest
         manifest = SourceManifest(
