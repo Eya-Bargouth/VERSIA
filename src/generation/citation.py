@@ -4,10 +4,11 @@
 Qdrant déjà retrouvé, jamais reproduits par le LLM (source d'erreur inutile
 sur des données qu'on connaît déjà avec certitude).
 
-Note connue : le payload Qdrant ne porte aucun chemin de fichier source (voir
-src/embeddings/vector_store.py::upsert) — `document` utilise `source_id` en
-attendant, ce qui est un identifiant de corpus (ex. "stripe_specs"), pas un
-chemin de fichier au sens strict de la spec §14.6.
+`document` utilise `payload["source_path"]` (chemin réel du fichier source,
+ex. "raw/specs-api/stripe/spec3-v2323.yaml") avec repli sur `source_id` (juste
+l'identifiant de corpus, ex. "stripe_specs") pour les chunks ingérés avant
+l'ajout de ce champ à ChunkMetadata — une ré-ingestion est nécessaire pour que
+`source_path` soit peuplé sur les chunks déjà dans Qdrant.
 """
 
 import structlog
@@ -39,7 +40,7 @@ def enrich_citations(raw_citations: list[RawCitation], chunks: list[dict]) -> li
             Citation(
                 citation_id=f"cit_{len(citations) + 1:03d}",
                 chunk_id=raw.chunk_id,
-                document=payload.get("source_id", "unknown"),
+                document=payload.get("source_path") or payload.get("source_id", "unknown"),
                 section=payload.get("hierarchy_path") or payload.get("section_title"),
                 page=payload.get("page_num"),
                 line=payload.get("line_num"),
