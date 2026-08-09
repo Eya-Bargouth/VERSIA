@@ -20,7 +20,7 @@ class YAMLBuilder(AbstractDOMBuilder):
         with open(source_path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
 
-        root = self._create_root_node(source_path, manifest.source_id)
+        root = self._create_root_node(source_path, manifest)
         tree = DocumentTree(root_id=root.id, source_id=manifest.source_id, source_path=source_path)
         tree.add_node(root)
 
