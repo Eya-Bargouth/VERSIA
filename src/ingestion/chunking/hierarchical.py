@@ -103,6 +103,7 @@ class HierarchicalChunker(ChunkingStrategy):
 
     def _create_leaf_chunk(self, tree: DocumentTree, node: DOMNode, policy: ChunkingPolicy, source_type: str) -> Chunk:
         """Crée un chunk feuille avec contextual_prefix."""
+        root = tree.nodes[tree.root_id]
         raw_text = node.markdown or node.text or ""
         hierarchy_path = build_hierarchy_path(tree, node.id)
 
@@ -120,6 +121,7 @@ class HierarchicalChunker(ChunkingStrategy):
             node_type=node.type,
             hierarchy_path=hierarchy_path,
             format_original=tree.source_path.split(".")[-1],
+            source_path=tree.source_path,
             section_title=next(
                 (a.metadata.get("title") or a.text for a in get_structural_ancestors(tree, node.id) if
                  a.type == NodeType.HEADING),
@@ -139,11 +141,15 @@ class HierarchicalChunker(ChunkingStrategy):
             level=node.level,
             metadata=metadata,
             hierarchy_path=hierarchy_path,
-            version_tag=node.version_tag,
-            version_order=node.version_order,
-            valid_from=node.valid_from,
-            valid_until=node.valid_until,
-            status=node.status,
+            # Hérité de la racine de l'arbre : un fichier source représente
+            # une seule version / une seule validité, déclarée une fois dans
+            # le manifeste — jamais différente d'un nœud à l'autre du même
+            # fichier (voir AbstractDOMBuilder._create_root_node).
+            version_tag=node.version_tag or root.version_tag,
+            version_order=node.version_order if node.version_order is not None else root.version_order,
+            valid_from=node.valid_from or root.valid_from,
+            valid_until=node.valid_until or root.valid_until,
+            status=node.status or root.status,
         )
 
     def _generate_contextual_prefix(self, tree: DocumentTree, node: DOMNode, policy: ChunkingPolicy) -> str:
@@ -195,6 +201,7 @@ class HierarchicalChunker(ChunkingStrategy):
         """Crée des chunks parents pour les nœuds structurels (SECTION, API_SCHEMA, etc.)."""
         structural_ids = {str(n.id) for n in leaf_nodes}
         structural_chunks = []
+        root = tree.nodes[tree.root_id]
         for node in tree.nodes.values():
             if not node.is_structural:
                 continue
@@ -214,6 +221,7 @@ class HierarchicalChunker(ChunkingStrategy):
                 node_type=node.type,
                 hierarchy_path=hierarchy_path,
                 format_original=tree.source_path.split(".")[-1],
+                source_path=tree.source_path,
                 section_title=node.metadata.get("title") or node.text,
                 page_num=node.page_num,
             )
@@ -226,11 +234,11 @@ class HierarchicalChunker(ChunkingStrategy):
                 level=node.level,
                 metadata=metadata,
                 hierarchy_path=hierarchy_path,
-                version_tag=node.version_tag,
-                version_order=node.version_order,
-                valid_from=node.valid_from,
-                valid_until=node.valid_until,
-                status=node.status,
+                version_tag=node.version_tag or root.version_tag,
+                version_order=node.version_order if node.version_order is not None else root.version_order,
+                valid_from=node.valid_from or root.valid_from,
+                valid_until=node.valid_until or root.valid_until,
+                status=node.status or root.status,
             )
             structural_chunks.append(chunk)
             chunk_map[str(node.id)] = chunk
