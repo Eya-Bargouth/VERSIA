@@ -11,6 +11,78 @@ from src.dom.models import NodeType
 pytestmark = pytest.mark.phase1
 
 
+class TestRootNodeVersioningAndValidity:
+    """AbstractDOMBuilder._create_root_node doit appliquer
+    manifest.versioning/manifest.validity à la racine — gap Phase 2 corrigé
+    en Phase 4 (voir docs/PHASE_4_SUMMARY.md)."""
+
+    def test_filename_pattern_sets_version_tag_and_order(self, tmp_path):
+        v_path = tmp_path / "spec3-v2213.yaml"
+        v_path.write_text(
+            "openapi: \"3.0.3\"\ninfo:\n  title: X\n  version: \"1.0.0\"\npaths: {}\n",
+            encoding="utf-8",
+        )
+        manifest = SourceManifest(
+            source_id="test_api",
+            parser="yaml_structured",
+            scope={"include": ["*.yaml"]},
+            versioning={
+                "strategy": "filename_pattern",
+                "pattern": r"spec3-(?P<version>.+)\.yaml",
+                "order": ["legacy", "v2213", "v2293"],
+            },
+        )
+        tree = YAMLBuilder().build(str(v_path), manifest)
+        root = tree.nodes[tree.root_id]
+        assert root.version_tag == "v2213"
+        assert root.version_order == 1
+
+    def test_validity_propagated_to_root(self, tmp_path):
+        v_path = tmp_path / "api.yaml"
+        v_path.write_text(
+            "openapi: \"3.0.3\"\ninfo:\n  title: X\n  version: \"1.0.0\"\npaths: {}\n",
+            encoding="utf-8",
+        )
+        manifest = SourceManifest(
+            source_id="test_api",
+            parser="yaml_structured",
+            scope={"include": ["*.yaml"]},
+            validity={"status": "deprecated", "valid_from": "2020-01-01"},
+        )
+        tree = YAMLBuilder().build(str(v_path), manifest)
+        root = tree.nodes[tree.root_id]
+        assert root.status == "deprecated"
+        assert str(root.valid_from) == "2020-01-01"
+
+    def test_no_versioning_strategy_leaves_root_untagged(self, sample_openapi_path):
+        manifest = SourceManifest(
+            source_id="test_api", parser="yaml_structured", scope={"include": ["*.yaml"]}
+        )
+        tree = YAMLBuilder().build(str(sample_openapi_path), manifest)
+        root = tree.nodes[tree.root_id]
+        assert root.version_tag is None
+        assert root.version_order is None
+
+    def test_pattern_not_matching_filename_does_not_crash(self, tmp_path):
+        v_path = tmp_path / "unrelated_name.yaml"
+        v_path.write_text(
+            "openapi: \"3.0.3\"\ninfo:\n  title: X\n  version: \"1.0.0\"\npaths: {}\n",
+            encoding="utf-8",
+        )
+        manifest = SourceManifest(
+            source_id="test_api",
+            parser="yaml_structured",
+            scope={"include": ["*.yaml"]},
+            versioning={
+                "strategy": "filename_pattern",
+                "pattern": r"spec3-(?P<version>.+)\.yaml",
+                "order": ["v1"],
+            },
+        )
+        tree = YAMLBuilder().build(str(v_path), manifest)
+        assert tree.nodes[tree.root_id].version_tag is None
+
+
 class TestYAMLBuilder:
     def test_supports_yaml(self):
         builder = YAMLBuilder()
