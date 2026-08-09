@@ -22,7 +22,7 @@ class MarkdownBuilder(AbstractDOMBuilder):
         md = MarkdownIt()
         tokens = md.parse(text)
 
-        root = self._create_root_node(source_path, manifest.source_id)
+        root = self._create_root_node(source_path, manifest)
         tree = DocumentTree(root_id=root.id, source_id=manifest.source_id, source_path=source_path)
         tree.add_node(root)
 
