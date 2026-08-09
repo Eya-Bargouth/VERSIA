@@ -20,6 +20,12 @@ class ChunkMetadata(BaseModel):
     node_type: NodeType
     hierarchy_path: str
     format_original: str
+    # Chemin du fichier source réel (ex. "raw/specs-api/stripe/spec3-v2323.yaml"),
+    # distinct de source_id (l'identifiant de corpus, ex. "stripe_specs") — un
+    # même source_id peut couvrir plusieurs fichiers (versions, cheat sheets...).
+    # Défaut "" pour rester compatible avec les chunks déjà en cache/Qdrant
+    # ingérés avant l'ajout de ce champ (ré-ingestion nécessaire pour le peupler).
+    source_path: str = ""
     section_title: str | None = None
     page_num: int | None = None
     line_num: int | None = None
