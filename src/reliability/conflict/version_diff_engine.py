@@ -67,24 +67,28 @@ class VersionDiffConflictDetector:
             type="temporal",
             confidence=1.0,  # déterministe — spec DiffReport.confidence="exact"
             method="version_diff",
-            explanation=self._summarize(changes, version_from, version_to),
+            explanation=summarize_changes(changes, version_from, version_to),
         )
 
-    @staticmethod
-    def _summarize(changes: list[Change], version_from: str, version_to: str) -> str:
-        lines = [f"Changements entre {version_from} et {version_to}:"]
-        for change in changes:
-            if change.change_type == "added":
-                lines.append(f"- {change.key}: ajouté en {version_to}")
-            elif change.change_type == "removed":
-                lines.append(f"- {change.key}: supprimé depuis {version_from}")
-            else:
-                fields = ", ".join(
-                    f"{field} ({_clip(v['old'])!r} -> {_clip(v['new'])!r})"
-                    for field, v in (change.field_changes or {}).items()
-                )
-                lines.append(f"- {change.key}: modifié ({fields})" if fields else f"- {change.key}: modifié")
-        return "\n".join(lines)
+
+def summarize_changes(changes: list[Change], version_from: str, version_to: str) -> str:
+    """Formate une liste de Change en texte lisible pour injection dans un
+    prompt (spec §6 "le generator.py charge le diff JSON... et l'injecte dans
+    le prompt"). Public : réutilisé par QueryPipeline pour les questions
+    comparatives où le diff est déjà chargé par HybridRetriever."""
+    lines = [f"Changements entre {version_from} et {version_to}:"]
+    for change in changes:
+        if change.change_type == "added":
+            lines.append(f"- {change.key}: ajouté en {version_to}")
+        elif change.change_type == "removed":
+            lines.append(f"- {change.key}: supprimé depuis {version_from}")
+        else:
+            fields = ", ".join(
+                f"{field} ({_clip(v['old'])!r} -> {_clip(v['new'])!r})"
+                for field, v in (change.field_changes or {}).items()
+            )
+            lines.append(f"- {change.key}: modifié ({fields})" if fields else f"- {change.key}: modifié")
+    return "\n".join(lines)
 
 
 def _clip(value, max_len: int = 160) -> str:
