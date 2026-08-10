@@ -13,10 +13,23 @@ import structlog
 from pydantic import BaseModel
 
 from src.dom.models import DocumentTree, NodeType
+from src.dom.utils import build_hierarchy_path
 
 logger = structlog.get_logger(__name__)
 
 _DIFF_DIR = Path("data/diffs")
+
+# Types de nœuds "narratifs" diffés génériquement (hierarchy_path + position),
+# faute de clé sémantique naturelle comme METHOD:path pour une API. Miroir de
+# HierarchicalChunker._CONTENT_NODE_TYPES (src/ingestion/chunking/hierarchical.py)
+# sans le dépendre directement, pour ne pas coupler les deux modules.
+_GENERIC_CONTENT_TYPES = {
+    NodeType.PARAGRAPH,
+    NodeType.LIST_ITEM,
+    NodeType.TABLE,
+    NodeType.CODE_BLOCK,
+    NodeType.HEADING,
+}
 
 
 class Change(BaseModel):
@@ -103,7 +116,14 @@ class VersionDiffEngine:
         return DiffReport(**data)
 
     def _canonicalize(self, tree: DocumentTree) -> dict[str, dict[str, Any]]:
-        """Extrait une représentation canonique indexée par clé sémantique."""
+        """Extrait une représentation canonique indexée par clé sémantique.
+
+        Les sources API-shaped (endpoint/paramètre/réponse) ont une clé
+        sémantique naturelle et stable (METHOD:path). Les documents narratifs
+        (paragraphes, listes, tableaux, titres...) n'en ont pas — on retombe
+        sur `_generic_key` (hierarchy_path + position), moins robuste aux
+        insertions/suppressions mais reste déterministe, sans ML, conforme à
+        spec §8a."""
         result: dict[str, dict[str, Any]] = {}
         for node in tree.nodes.values():
             if node.type == NodeType.API_ENDPOINT:
@@ -134,7 +154,35 @@ class VersionDiffEngine:
                     "content_hash": node.content_hash,
                     "metadata": node.metadata,
                 }
+            elif node.type in _GENERIC_CONTENT_TYPES:
+                key = self._generic_key(tree, node)
+                result[key] = {
+                    "text": node.text,
+                    "markdown": node.markdown,
+                    "content_hash": node.content_hash,
+                    "metadata": node.metadata,
+                }
         return result
+
+    @staticmethod
+    def _generic_key(tree: DocumentTree, node) -> str:
+        """Clé sémantique pour un nœud narratif : chemin hiérarchique (titres
+        de sections) + type + position ordinale parmi les frères de même type
+        sous ce chemin (ex. "Doc > Auth|paragraph#2").
+
+        Limite connue : contrairement à METHOD:path pour une API, cette clé
+        n'a pas de sens stable intrinsèque — si un paragraphe est inséré ou
+        supprimé au milieu d'une section, les index de tous les paragraphes
+        suivants décalent, ce qui les fait apparaître comme "modified" même
+        si leur contenu n'a pas changé (faux positifs). C'est la même
+        limite que n'importe quel diff positionnel sur du texte non
+        structuré — pas de solution déterministe sans ML pour ce cas."""
+        path = build_hierarchy_path(tree, node.id)
+        parent = tree.get_parent(node.id)
+        siblings = tree.get_children(parent.id) if parent else [node]
+        same_type = [s for s in siblings if s.type == node.type]
+        ordinal = next((i for i, s in enumerate(same_type) if s.id == node.id), 0)
+        return f"{path}|{node.type.value}#{ordinal}"
 
     def _compare_fields(self, old: dict[str, Any], new: dict[str, Any]) -> dict[str, dict[str, Any]]:
         """Détaille les champs modifiés entre deux entrées canoniques."""
