@@ -31,47 +31,51 @@ class QueryPlanner:
                 detect a source filter from the query text.
             version_tags: Optional list of known version tags (e.g. "v2323")
                 used to detect a version filter from the query text.
-                When either is not provided, it is discovered dynamically from
-                the manifests in ``settings.manifest_dir`` (see
-                ``_discover_manifest_index``). No corpus name or version tag is
-                ever hardcoded here — everything comes from each SourceManifest's
-                own ``source_id``/``query_aliases``/``versioning.order`` fields.
+                When either is not provided, it is discovered dynamically by
+                walking ``settings.raw_data_dir`` (see
+                ``_discover_source_index``). No corpus name or version tag is
+                ever hardcoded here — everything comes from each discovered
+                source's own ``source_id`` (and its optional versioning
+                override, see SourceConfig).
         """
         self.llm_client = llm_client
         needs_discovery = source_aliases is None or version_tags is None
         discovered_aliases, discovered_versions = (
-            self._discover_manifest_index() if needs_discovery else ({}, [])
+            self._discover_source_index() if needs_discovery else ({}, [])
         )
         self.source_aliases = source_aliases if source_aliases is not None else discovered_aliases
         self.version_tags = version_tags if version_tags is not None else discovered_versions
 
     @staticmethod
-    def _discover_manifest_index():
-        """Build (source_aliases, version_tags) from discovered manifests.
+    def _discover_source_index():
+        """Build (source_aliases, version_tags) from auto-discovered sources.
 
         Generic by construction: this function contains no corpus name and no
-        version literal. It only reads whatever manifests are found in the
-        configured manifest directory and uses their declared
-        ``source_id``/``query_aliases``/``versioning.order`` fields.
+        version literal. It only reads whatever sources are discovered under
+        the configured raw data directory and uses each source's own
+        ``source_id`` (also split on "_" into extra alias tokens, since
+        source_id is now the sole naming signal — no more query_aliases
+        declared by hand) and optional ``version_order`` (from a versioning
+        override, when one exists).
         """
         try:
             from src.config.settings import get_settings
-            from src.ingestion.pipeline import discover_manifests
+            from src.ingestion.pipeline import discover_sources
 
-            manifest_dir = get_settings().manifest_dir
-            manifests = discover_manifests(manifest_dir)
+            settings = get_settings()
+            sources = discover_sources(settings.raw_data_dir, versioning_dir=settings.versioning_dir)
         except Exception as exc:
-            logger.warning("planner_manifest_discovery_failed", error=str(exc))
+            logger.warning("planner_source_discovery_failed", error=str(exc))
             return {}, []
 
         aliases: Dict[str, str] = {}
         version_tags: list = []
-        for manifest in manifests:
-            keywords = set(manifest.query_aliases) | {manifest.source_id}
+        for source in sources:
+            keywords = {source.source_id} | set(source.source_id.split("_"))
             for keyword in keywords:
                 if keyword:
-                    aliases[keyword.lower()] = manifest.source_id
-            for tag in manifest.versioning.order or []:
+                    aliases[keyword.lower()] = source.source_id
+            for tag in source.version_order or []:
                 if tag and tag not in version_tags:
                     version_tags.append(tag)
         return aliases, version_tags
