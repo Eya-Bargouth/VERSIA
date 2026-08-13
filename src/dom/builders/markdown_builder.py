@@ -4,7 +4,7 @@ from pathlib import Path
 
 from markdown_it import MarkdownIt
 
-from src.config.manifest_schema import SourceManifest
+from src.config.source_config import SourceConfig
 from src.dom.builders.base import AbstractDOMBuilder
 from src.dom.models import DOMNode, DocumentTree, NodeType
 
@@ -15,15 +15,15 @@ class MarkdownBuilder(AbstractDOMBuilder):
     def supports(self, file_path: str) -> bool:
         return Path(file_path).suffix.lower() in {".md", ".markdown"}
 
-    def build(self, source_path: str, manifest: SourceManifest) -> DocumentTree:
+    def build(self, source_path: str, config: SourceConfig) -> DocumentTree:
         with open(source_path, "r", encoding="utf-8") as f:
             text = f.read()
 
         md = MarkdownIt()
         tokens = md.parse(text)
 
-        root = self._create_root_node(source_path, manifest)
-        tree = DocumentTree(root_id=root.id, source_id=manifest.source_id, source_path=source_path)
+        root = self._create_root_node(source_path, config)
+        tree = DocumentTree(root_id=root.id, source_id=config.source_id, source_path=source_path)
         tree.add_node(root)
 
         # Stack pour gérer la hiérarchie des sections
@@ -49,7 +49,7 @@ class MarkdownBuilder(AbstractDOMBuilder):
 
                 heading_node = DOMNode(
                     type=NodeType.HEADING,
-                    source_id=manifest.source_id,
+                    source_id=config.source_id,
                     source_path=source_path,
                     text=title,
                     markdown=f"{'#' * level} {title}",
@@ -69,7 +69,7 @@ class MarkdownBuilder(AbstractDOMBuilder):
                 i += 1  # paragraph_close
                 para = DOMNode(
                     type=NodeType.PARAGRAPH,
-                    source_id=manifest.source_id,
+                    source_id=config.source_id,
                     source_path=source_path,
                     text=content,
                     markdown=content,
@@ -79,7 +79,7 @@ class MarkdownBuilder(AbstractDOMBuilder):
             elif token.type == "bullet_list_open" or token.type == "ordered_list_open":
                 list_node = DOMNode(
                     type=NodeType.LIST,
-                    source_id=manifest.source_id,
+                    source_id=config.source_id,
                     source_path=source_path,
                     text="",
                     markdown="",
@@ -97,7 +97,7 @@ class MarkdownBuilder(AbstractDOMBuilder):
                 i += 1  # list_item_close
                 item = DOMNode(
                     type=NodeType.LIST_ITEM,
-                    source_id=manifest.source_id,
+                    source_id=config.source_id,
                     source_path=source_path,
                     text=content,
                     markdown=f"- {content}",
@@ -112,7 +112,7 @@ class MarkdownBuilder(AbstractDOMBuilder):
             elif token.type == "fence":
                 code = DOMNode(
                     type=NodeType.CODE_BLOCK,
-                    source_id=manifest.source_id,
+                    source_id=config.source_id,
                     source_path=source_path,
                     text=token.content,
                     markdown=f"```{token.info}\n{token.content}\n```",
