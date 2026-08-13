@@ -52,14 +52,18 @@ class Settings(BaseSettings):
 
     # Paths
     raw_data_dir: Path = Path("./raw")
-    manifest_dir: Path = Path("./tests/fixtures/manifests")
+    # Override de versioning optionnel — seule exception restante à la
+    # découverte 100% automatique des sources (voir src/ingestion/pipeline.py
+    # ::discover_sources). Un fichier <source_id>.yaml par source versionnée,
+    # jamais dans raw_data_dir (lecture seule).
+    versioning_dir: Path = Path("./tests/fixtures/versioning")
     cache_dir: Path = Path("./data/cache")
 
     # Logging
     log_level: str = "INFO"
     log_format: Literal["json", "console"] = "json"
 
-    @field_validator("raw_data_dir", "manifest_dir", mode="before")
+    @field_validator("raw_data_dir", "versioning_dir", mode="before")
     @classmethod
     def _coerce_path(cls, v):
         return Path(v) if not isinstance(v, Path) else v
