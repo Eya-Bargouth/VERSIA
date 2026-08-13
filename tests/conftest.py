@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from src.config.manifest_schema import SourceManifest
+from src.config.source_config import SourceConfig
 from src.config.settings import Settings, get_settings
 from src.llm.interface import LLMConfig, LLMMessage, LLMResponse, LLMUsage
 
@@ -43,14 +43,8 @@ def sample_json_path(fixtures_dir) -> Path:
 
 
 @pytest.fixture
-def sample_manifest() -> SourceManifest:
-    return SourceManifest(
-        manifest_version="1.0.0",
-        source_id="test_source",
-        parser="markdown",
-        scope={"include": ["*.md"]},
-        chunking_policy={"semantic_unit": "paragraph"},
-    )
+def sample_source_config() -> SourceConfig:
+    return SourceConfig(source_id="test_source")
 
 
 @pytest.fixture
