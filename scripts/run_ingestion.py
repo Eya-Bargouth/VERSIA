@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
-"""Script d'ingestion complete — Phase 1 (placeholder)."""
-
-# TODO: Phase 2 - implementer
-
-#!/usr/bin/env python3
-"""Script d'ingestion batch avec découverte dynamique des manifestes."""
+"""Script d'ingestion batch avec découverte 100% automatique des sources
+(tout dossier de raw/ contenant des fichiers supportés — plus de manifeste
+à écrire, voir src/ingestion/pipeline.py::discover_sources)."""
 
 import argparse
 import sys
@@ -29,9 +26,10 @@ logger = structlog.get_logger(__name__)
 
 def main():
     parser = argparse.ArgumentParser(description="TRADE Ingestion Pipeline")
-    parser.add_argument("--manifest-dir", type=Path, required=True, help="Répertoire des manifestes YAML")
     parser.add_argument("--raw-dir", type=Path, required=True, help="Répertoire du corpus raw/")
+    parser.add_argument("--versioning-dir", type=Path, default=None, help="Répertoire des overrides de versioning (défaut : settings.versioning_dir)")
     parser.add_argument("--source-id", type=str, default=None, help="Ingestion d'une seule source")
+    parser.add_argument("--file-filter", type=str, default=None, help="Ne traiter que les fichiers dont le nom contient cette sous-chaîne")
     parser.add_argument("--qdrant-url", type=str, default=None, help="URL Qdrant (override)")
     parser.add_argument(
         "--prefix-method",
@@ -51,7 +49,11 @@ def main():
 
     # Override si fourni en CLI
     qdrant_url = args.qdrant_url or f"http://{settings.qdrant_host}:{settings.qdrant_port}"
-    client = QdrantClient(qdrant_url)
+    # timeout par défaut du client (5s) trop court pour un upsert de lot sur
+    # une collection sous charge soutenue (corpus volumineux, voir
+    # QdrantStore.upsert batch_size=256) — a provoqué un échec réel en
+    # pratique sur le plus gros fichier Stripe.
+    client = QdrantClient(qdrant_url, timeout=120)
     store = QdrantStore(client=client, collection_name=settings.qdrant_collection_name)
     store.ensure_collection()
 
@@ -77,14 +79,15 @@ def main():
         llm_client = LLMFactory.create(llm_config)
 
     report = run_ingestion(
-        manifest_dir=args.manifest_dir,
         raw_dir=args.raw_dir,
         store=store,
         embedder=embedder,
         source_id_filter=args.source_id,
+        file_filter=args.file_filter,
         prefix_method=args.prefix_method,
         llm_client=llm_client,
         llm_config=llm_config,
+        versioning_dir=args.versioning_dir,
     )
 
     print("\n=== Ingestion Report ===")
