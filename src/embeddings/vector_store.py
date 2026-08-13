@@ -104,7 +104,15 @@ class QdrantStore:
                 )
             )
 
-        self.client.upsert(collection_name=self.collection_name, points=points)
+        # Par lots : un seul appel HTTP avec des dizaines de milliers de
+        # points (cas réel depuis le passage au chunking générique universel,
+        # voir Phase 5) provoque une coupure de connexion côté client
+        # (WinError 10053) — Qdrant encaisse très bien des lots de quelques
+        # centaines de points, jamais un envoi monolithique.
+        batch_size = 256
+        for i in range(0, len(points), batch_size):
+            batch = points[i : i + batch_size]
+            self.client.upsert(collection_name=self.collection_name, points=batch)
         logger.info("upsert_complete", count=len(points))
 
     def search_dense(
