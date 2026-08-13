@@ -1,9 +1,10 @@
 """Tests unitaires pour la configuration."""
 
 import pytest
+from pydantic import ValidationError
 
-from src.config.manifest_schema import ChunkingPolicy, SourceManifest
 from src.config.settings import Settings
+from src.config.source_config import SourceConfig
 
 
 pytestmark = pytest.mark.phase1
@@ -25,40 +26,28 @@ class TestSettings:
         assert s.llm_model == "llama3:8b"
 
 
-class TestManifestSchema:
-    def test_source_manifest_creation(self):
-        m = SourceManifest(
-            source_id="test_api",
-            parser="yaml_structured",
-            scope={"include": ["*.yaml"]},
+class TestSourceConfig:
+    """SourceConfig remplace SourceManifest (Phase 5) — plus de manifeste à
+    écrire, seul le versioning reste une exception déclarable, hors de ce
+    modèle (voir tests/fixtures/versioning/, chargé par
+    src.ingestion.pipeline.discover_sources)."""
+
+    def test_source_config_defaults(self):
+        c = SourceConfig(source_id="test_api")
+        assert c.source_id == "test_api"
+        assert c.source_type == "document"
+        assert c.version_pattern is None
+        assert c.version_order is None
+
+    def test_source_id_must_match_pattern(self):
+        with pytest.raises(ValidationError):
+            SourceConfig(source_id="bad id with spaces")
+
+    def test_versioning_override_fields(self):
+        c = SourceConfig(
+            source_id="stripe",
+            version_pattern=r"spec3-(?P<version>.+)\.yaml",
+            version_order=["legacy", "v2213"],
         )
-        assert m.source_id == "test_api"
-        assert m.parser == "yaml_structured"
-        assert m.chunking_policy.semantic_unit == "paragraph"
-
-    def test_manifest_scope_must_have_include(self):
-        with pytest.raises(ValueError, match="include"):
-            SourceManifest(
-                source_id="bad",
-                parser="markdown",
-                scope={"exclude": ["*"]},
-            )
-
-    def test_manifest_from_yaml(self, tmp_path):
-        yaml_content = """
-manifest_version: "1.0.0"
-source_id: my_source
-parser: markdown
-scope:
-  include:
-    - "*.md"
-chunking_policy:
-  semantic_unit: paragraph
-validity:
-  status: active
-"""
-        path = tmp_path / "manifest.yaml"
-        path.write_text(yaml_content, encoding="utf-8")
-        m = SourceManifest.from_yaml(path)
-        assert m.source_id == "my_source"
-        assert m.validity.status == "active"
+        assert c.version_pattern == r"spec3-(?P<version>.+)\.yaml"
+        assert c.version_order == ["legacy", "v2213"]
