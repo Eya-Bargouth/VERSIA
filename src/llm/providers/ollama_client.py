@@ -33,6 +33,8 @@ class OllamaClient(BaseLLMClient):
                 "num_predict": config.max_tokens,
             },
         }
+        if config.num_gpu is not None:
+            payload["options"]["num_gpu"] = config.num_gpu
         if config.response_format is not None:
             # Ollama structured outputs: `format` prend directement le JSON
             # schema (contrairement à l'API OpenAI-compatible de vLLM, qui
@@ -75,6 +77,8 @@ class OllamaClient(BaseLLMClient):
                 "num_predict": config.max_tokens,
             },
         }
+        if config.num_gpu is not None:
+            payload["options"]["num_gpu"] = config.num_gpu
 
         async with httpx.AsyncClient() as client:
             async with client.stream("POST", url, json=payload, timeout=config.timeout) as response:
