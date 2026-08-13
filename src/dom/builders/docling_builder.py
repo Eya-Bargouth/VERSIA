@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from uuid import uuid4
 
-from src.config.manifest_schema import SourceManifest
+from src.config.source_config import SourceConfig
 from src.dom.builders.base import AbstractDOMBuilder
 from src.dom.models import BoundingBox, DOMNode, DocumentTree, NodeType, TextStyle
 
@@ -18,17 +18,17 @@ class DoclingBuilder(AbstractDOMBuilder):
         ext = Path(file_path).suffix.lower()
         return ext in {".pdf", ".docx", ".pptx"}
 
-    def build(self, source_path: str, manifest: SourceManifest) -> DocumentTree:
+    def build(self, source_path: str, config: SourceConfig) -> DocumentTree:
         try:
-            return self._build_with_docling(source_path, manifest)
+            return self._build_with_docling(source_path, config)
         except Exception as exc:
             logger.warning("docling_failed", error=str(exc), fallback="pdfplumber/unstructured")
             ext = Path(source_path).suffix.lower()
             if ext == ".pdf":
-                return self._build_with_pdfplumber(source_path, manifest)
+                return self._build_with_pdfplumber(source_path, config)
             raise RuntimeError(f"No fallback available for {ext}")
 
-    def _build_with_docling(self, source_path: str, manifest: SourceManifest) -> DocumentTree:
+    def _build_with_docling(self, source_path: str, config: SourceConfig) -> DocumentTree:
         try:
             from docling.document_converter import DocumentConverter
         except ImportError:
@@ -38,13 +38,18 @@ class DoclingBuilder(AbstractDOMBuilder):
         result = converter.convert(source_path)
         doc = result.document
 
-        root = self._create_root_node(source_path, manifest)
-        tree = DocumentTree(root_id=root.id, source_id=manifest.source_id, source_path=source_path)
+        root = self._create_root_node(source_path, config)
+        tree = DocumentTree(root_id=root.id, source_id=config.source_id, source_path=source_path)
         tree.add_node(root)
 
-        # Itération simplifiée sur les éléments exportés en markdown
-        for item in doc.iterate_items():
-            node = self._docling_item_to_node(item, manifest.source_id, source_path, root.id)
+        # Itération simplifiée sur les éléments exportés en markdown.
+        # DoclingDocument.iterate_items() renvoie des tuples (NodeItem, level)
+        # — sans ce déballage, `item` reste le tuple et getattr(item, "text",
+        # "")/getattr(item, "label", None) retombent silencieusement sur ""/None
+        # pour chaque élément (bug trouvé en vérifiant le vrai contenu ingéré
+        # pour gdpr-full.pdf : 1275/1276 chunks vides).
+        for item, _level in doc.iterate_items():
+            node = self._docling_item_to_node(item, config.source_id, source_path, root.id)
             tree.add_node(node, parent_id=root.id)
 
         tree.compute_all_hashes()
@@ -90,18 +95,18 @@ class DoclingBuilder(AbstractDOMBuilder):
             bbox=bbox,
         )
 
-    def _build_with_pdfplumber(self, source_path: str, manifest: SourceManifest) -> DocumentTree:
+    def _build_with_pdfplumber(self, source_path: str, config: SourceConfig) -> DocumentTree:
         import pdfplumber
 
-        root = self._create_root_node(source_path, manifest)
-        tree = DocumentTree(root_id=root.id, source_id=manifest.source_id, source_path=source_path)
+        root = self._create_root_node(source_path, config)
+        tree = DocumentTree(root_id=root.id, source_id=config.source_id, source_path=source_path)
         tree.add_node(root)
 
         with pdfplumber.open(source_path) as pdf:
             for page_num, page in enumerate(pdf.pages, start=1):
                 page_node = DOMNode(
                     type=NodeType.PAGE,
-                    source_id=manifest.source_id,
+                    source_id=config.source_id,
                     source_path=source_path,
                     page_num=page_num,
                     is_structural=True,
@@ -115,7 +120,7 @@ class DoclingBuilder(AbstractDOMBuilder):
                     for line_text in lines:
                         para = DOMNode(
                             type=NodeType.PARAGRAPH,
-                            source_id=manifest.source_id,
+                            source_id=config.source_id,
                             source_path=source_path,
                             text=line_text,
                             markdown=line_text,
@@ -128,7 +133,7 @@ class DoclingBuilder(AbstractDOMBuilder):
                         if line.strip():
                             para = DOMNode(
                                 type=NodeType.PARAGRAPH,
-                                source_id=manifest.source_id,
+                                source_id=config.source_id,
                                 source_path=source_path,
                                 text=line,
                                 markdown=line,
