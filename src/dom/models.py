@@ -14,7 +14,6 @@ if TYPE_CHECKING:
     # Only for static type checking — importing these at runtime would create
     # a circular import (src.ingestion.chunking.* already imports from
     # src.dom.models). See DocumentTree.to_chunks() below.
-    from src.config.manifest_schema import ChunkingPolicy
     from src.ingestion.chunking.base import ChunkingStrategy
     from src.ingestion.metadata import Chunk
 
@@ -195,9 +194,7 @@ class DocumentTree(BaseModel):
         for node in self.nodes.values():
             node.compute_hash()
 
-    def to_chunks(
-        self, strategy: "ChunkingStrategy", policy: "ChunkingPolicy", source_type: str = "unknown"
-    ) -> list["Chunk"]:
+    def to_chunks(self, strategy: "ChunkingStrategy", source_type: str = "unknown") -> list["Chunk"]:
         """Délègue le chunking à *strategy* (contrat spec §12.1/§12.2).
 
         Thin wrapper kept here for API-contract parity with the spec — the
@@ -205,9 +202,9 @@ class DocumentTree(BaseModel):
         HierarchicalChunker) so that src/dom/ stays decoupled from the
         ingestion layer (no runtime import of ChunkingStrategy here; see the
         TYPE_CHECKING guard above). Equivalent to
-        ``strategy.chunk(tree, policy, source_type=source_type)``.
+        ``strategy.chunk(tree, source_type=source_type)``.
         """
-        return strategy.chunk(self, policy, source_type=source_type)
+        return strategy.chunk(self, source_type=source_type)
 
     def validate_integrity(self) -> list[str]:
         """Retourne une liste d'erreurs si l'arbre est corrompu."""
