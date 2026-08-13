@@ -3,7 +3,7 @@
 import pytest
 from pathlib import Path
 
-from src.config.manifest_schema import SourceManifest
+from src.config.source_config import SourceConfig
 from src.dom.builders.markdown_builder import MarkdownBuilder
 from src.dom.builders.yaml_builder import YAMLBuilder
 from src.ingestion.version_diff import VersionDiffEngine, DiffReport
@@ -13,8 +13,8 @@ pytestmark = pytest.mark.phase2
 
 def _tagged_markdown_tree(path: Path, content: str, tag: str, source_id: str = "policy_doc"):
     path.write_text(content, encoding="utf-8")
-    manifest = SourceManifest(source_id=source_id, parser="markdown", scope={"include": ["*.md"]})
-    tree = MarkdownBuilder().build(str(path), manifest)
+    config = SourceConfig(source_id=source_id)
+    tree = MarkdownBuilder().build(str(path), config)
     tree.compute_all_hashes()
     tree.nodes[tree.root_id].version_tag = tag
     return tree
@@ -72,21 +72,23 @@ paths:
           description: Bad request
 """, encoding="utf-8")
 
-        manifest = SourceManifest(
-            source_id="test_api",
-            parser="yaml_structured",
-            scope={"include": ["*.yaml"]},
-        )
-        tree_v1 = YAMLBuilder().build(str(v1_yaml), manifest)
-        tree_v2 = YAMLBuilder().build(str(v2_yaml), manifest)
+        config = SourceConfig(source_id="test_api")
+        tree_v1 = YAMLBuilder().build(str(v1_yaml), config)
+        tree_v2 = YAMLBuilder().build(str(v2_yaml), config)
 
         engine = VersionDiffEngine(diff_dir=tmp_path / "diffs")
         report = engine.diff(tree_v1, tree_v2)
 
         assert isinstance(report, DiffReport)
         assert report.source_id == "test_api"
-        assert any(c.change_type == "added" for c in report.changes)
-        assert any(c.change_type == "modified" for c in report.changes)
+        # Plus d'extraction OpenAPI spécifique : l'endpoint entier (summary +
+        # parameters + responses) est UN seul nœud générique — le paramètre
+        # "quantity" ajouté en v2 n'est plus un nœud à part détecté comme
+        # "added", c'est une modification du contenu de l'endpoint.
+        modified = [c for c in report.changes if c.change_type == "modified"]
+        assert len(modified) == 1
+        assert "quantity" in modified[0].field_changes["text"]["new"]
+        assert "quantity" not in modified[0].field_changes["text"]["old"]
 
     def test_diff_detects_description_only_change(self, tmp_path):
         """La description d'un endpoint vit dans `markdown`, jamais dans
@@ -124,13 +126,9 @@ paths:
           description: OK
 """, encoding="utf-8")
 
-        manifest = SourceManifest(
-            source_id="test_api",
-            parser="yaml_structured",
-            scope={"include": ["*.yaml"]},
-        )
-        tree_v1 = YAMLBuilder().build(str(v1_yaml), manifest)
-        tree_v2 = YAMLBuilder().build(str(v2_yaml), manifest)
+        config = SourceConfig(source_id="test_api")
+        tree_v1 = YAMLBuilder().build(str(v1_yaml), config)
+        tree_v2 = YAMLBuilder().build(str(v2_yaml), config)
 
         engine = VersionDiffEngine(diff_dir=tmp_path / "diffs")
         report = engine.diff(tree_v1, tree_v2)
@@ -170,13 +168,9 @@ paths:
       summary: Ping v2
 """, encoding="utf-8")
 
-        manifest = SourceManifest(
-            source_id="x",
-            parser="yaml_structured",
-            scope={"include": ["*.yaml"]},
-        )
-        tree_v1 = YAMLBuilder().build(str(v1_yaml), manifest)
-        tree_v2 = YAMLBuilder().build(str(v2_yaml), manifest)
+        config = SourceConfig(source_id="x")
+        tree_v1 = YAMLBuilder().build(str(v1_yaml), config)
+        tree_v2 = YAMLBuilder().build(str(v2_yaml), config)
 
         engine = VersionDiffEngine(diff_dir=tmp_path / "diffs")
         report = engine.diff(tree_v1, tree_v2)
@@ -254,13 +248,11 @@ class TestVersionDiffEngineNarrativeDocs:
         # pas à son propre contenu inchangé : c'est le faux positif attendu.
         assert len(report.changes) >= 2
 
-    def test_api_and_narrative_nodes_coexist_in_same_diff(self, tmp_path):
-        """Un même arbre peut mélanger API_ENDPOINT (clé naturelle) et
-        PARAGRAPH (clé générique) — les deux stratégies doivent cohabiter
-        sans collision de clé."""
-        manifest = SourceManifest(
-            source_id="mixed", parser="yaml_structured", scope={"include": ["*.yaml"]}
-        )
+    def test_yaml_sourced_nodes_use_generic_key(self, tmp_path):
+        """Plus d'extraction OpenAPI spécifique, donc plus de clé sémantique
+        METHOD:path — tout nœud, YAML ou narratif, passe par la même clé
+        générique (hierarchy_path + position), voir _generic_key."""
+        config = SourceConfig(source_id="mixed")
         yaml_v1 = tmp_path / "api_v1.yaml"
         yaml_v1.write_text(
             "openapi: \"3.0.3\"\ninfo:\n  title: X\n  version: \"1.0.0\"\n"
@@ -273,12 +265,14 @@ class TestVersionDiffEngineNarrativeDocs:
             "paths:\n  /ping:\n    get:\n      summary: Ping v2\n",
             encoding="utf-8",
         )
-        tree_v1 = YAMLBuilder().build(str(yaml_v1), manifest)
-        tree_v2 = YAMLBuilder().build(str(yaml_v2), manifest)
+        tree_v1 = YAMLBuilder().build(str(yaml_v1), config)
+        tree_v2 = YAMLBuilder().build(str(yaml_v2), config)
         tree_v1.compute_all_hashes()
         tree_v2.compute_all_hashes()
 
         engine = VersionDiffEngine(diff_dir=tmp_path / "diffs")
         report = engine.diff(tree_v1, tree_v2)
 
-        assert any(c.change_type == "modified" and "GET:/ping" in c.key for c in report.changes)
+        modified = [c for c in report.changes if c.change_type == "modified"]
+        assert len(modified) == 1
+        assert "Ping v2" in modified[0].field_changes["text"]["new"]
