@@ -1,0 +1,8 @@
+{
+  "source_id": "stripe_specs",
+  "version_from": "v2293",
+  "version_to": "v2323",
+  "changes": [],
+  "strategy": "deterministe",
+  "confidence": "exact"
+}

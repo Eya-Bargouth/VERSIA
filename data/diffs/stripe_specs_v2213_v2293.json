@@ -1,0 +1,228 @@
+{
+  "source_id": "stripe_specs",
+  "version_from": "v2213",
+  "version_to": "v2293",
+  "changes": [
+    {
+      "key": "POST:/v1/payment_intents/{intent}/increment_authorization",
+      "change_type": "modified",
+      "field_changes": {
+        "markdown": {
+          "old": "### POST /v1/payment_intents/{intent}/increment_authorization\n**Summary:** Increment an authorization\n**Description:** <p>Perform an incremental authorization on an eligible\n<a href=\"/docs/api/payment_intents/object\">PaymentIntent</a>. To be eligible, the\nPaymentIntent’s status must be <code>requires_capture</code> and\n<a href=\"/docs/api/charges/object#charge_object-payment_method_details-card_present-incremental_authorization_supported\">incremental_authorization_supported</a>\nmust be <code>true</code>.</p>\n\n<p>Incremental authorizations attempt to increase the authorized amount on\nyour customer’s card to the new, higher <code>amount</code> provided. Similar to the\ninitial authorization, incremental authorizations can be declined. A\nsingle PaymentIntent can call this endpoint multiple times to further\nincrease the authorized amount.</p>\n\n<p>If the incremental authorization succeeds, the PaymentIntent object\nreturns with the updated\n<a href=\"/docs/api/payment_intents/object#payment_intent_object-amount\">amount</a>.\nIf the incremental authorization fails, a\n<a href=\"/docs/error-codes#card-declined\">card_declined</a> error returns, and no other\nfields on the PaymentIntent or Charge update. The PaymentIntent\nobject remains capturable for the previously authorized amount.</p>\n\n<p>Each PaymentIntent can have a maximum of 10 incremental authorization attempts, including declines.\nAfter it’s captured, a PaymentIntent can no longer be incremented.</p>\n\n<p>Learn more about <a href=\"/docs/terminal/features/incremental-authorizations\">incremental authorizations</a>.</p>",
+          "new": "### POST /v1/payment_intents/{intent}/increment_authorization\n**Summary:** Increment an authorization\n**Description:** <p>Perform an incremental authorization on an eligible\n<a href=\"/docs/api/payment_intents/object\">PaymentIntent</a>. To be eligible, the\nPaymentIntent’s status must be <code>requires_capture</code> and\n<a href=\"/docs/api/charges/object#charge_object-payment_method_details-card_present-incremental_authorization_supported\">incremental_authorization_supported</a>\nmust be <code>true</code>.</p>\n\n<p>Incremental authorizations attempt to increase the authorized amount on\nyour customer’s card to the new, higher <code>amount</code> provided. Similar to the\ninitial authorization, incremental authorizations can be declined. A\nsingle PaymentIntent can call this endpoint multiple times to further\nincrease the authorized amount.</p>\n\n<p>If the incremental authorization succeeds, the PaymentIntent object\nreturns with the updated\n<a href=\"/docs/api/payment_intents/object#payment_intent_object-amount\">amount</a>.\nIf the incremental authorization fails, a\n<a href=\"/docs/error-codes#card-declined\">card_declined</a> error returns, and no other\nfields on the PaymentIntent or Charge update. The PaymentIntent\nobject remains capturable for the previously authorized amount.</p>\n\n<p>Each PaymentIntent can have a maximum of 10 incremental authorization attempts, including declines.\nAfter it’s captured, a PaymentIntent can no longer be incremented.</p>\n\n<p>Learn more about incremental authorizations with\n<a href=\"/docs/terminal/features/incremental-authorizations\">in-person payments</a> and\n<a href=\"/docs/payments/incremental-authorization?platform=web&ui=elements\">online payments</a>.</p>"
+        }
+      },
+      "old_content_hash": "60ce7683bbee3279bbdcf21581e9ad9598883e243fdd61100d92d7e7c02d5f39",
+      "new_content_hash": "339ce38995bb6f14ad07df2a275996e26e7ddea3d4e01f4212d22f93a3078eda"
+    },
+    {
+      "key": "DELETE:/v1/subscriptions/{subscription_exposed_id}",
+      "change_type": "modified",
+      "field_changes": {
+        "markdown": {
+          "old": "### DELETE /v1/subscriptions/{subscription_exposed_id}\n**Summary:** Cancel a subscription\n**Description:** <p>Cancels a customer’s subscription immediately. The customer won’t be charged again for the subscription. After it’s canceled, you can no longer update the subscription or its <a href=\"/metadata\">metadata</a>.</p>\n\n<p>Any pending invoice items that you’ve created are still charged at the end of the period, unless manually <a href=\"/api/invoiceitems/delete\">deleted</a>. If you’ve set the subscription to cancel at the end of the period, any pending prorations are also left in place and collected at the end of the period. But if the subscription is set to cancel immediately, pending prorations are removed if <code>invoice_now</code> and <code>prorate</code> are both set to true.</p>\n\n<p>By default, upon subscription cancellation, Stripe stops automatic collection of all finalized invoices for the customer. This is intended to prevent unexpected payment attempts after the customer has canceled a subscription. However, you can resume automatic collection of the invoices manually after subscription cancellation to have us proceed. Or, you could check for unpaid invoices before allowing the customer to cancel the subscription at all.</p>",
+          "new": "### DELETE /v1/subscriptions/{subscription_exposed_id}\n**Summary:** Cancel a subscription\n**Description:** <p>Cancels a customer’s subscription immediately. The customer won’t be charged again for the subscription. After it’s canceled, the subscription is largely immutable. You can still update its <a href=\"/metadata\">metadata</a> and <code>cancellation_details</code>.</p>\n\n<p>Any pending invoice items that you’ve created are still charged at the end of the period, unless manually <a href=\"/api/invoiceitems/delete\">deleted</a>. If you’ve set the subscription to cancel at the end of the period, any pending prorations are also left in place and collected at the end of the period. But if the subscription is set to cancel immediately, pending prorations are removed if <code>invoice_now</code> and <code>prorate</code> are both set to true.</p>\n\n<p>By default, upon subscription cancellation, Stripe stops automatic collection of all finalized invoices for the customer. This is intended to prevent unexpected payment attempts after the customer has canceled a subscription. However, you can resume automatic collection of the invoices manually after subscription cancellation to have us proceed. Or, you could check for unpaid invoices before allowing the customer to cancel the subscription at all.</p>"
+        }
+      },
+      "old_content_hash": "e5c972d84dd6e4aa54be5451c1b163bbea3809fb96e2607d0a18d68057d20c09",
+      "new_content_hash": "80564ed11a9e67a45dce349852260346190f5614d210f19881bd77ae522c36ee"
+    },
+    {
+      "key": "POST:/v1/tax/calculations",
+      "change_type": "modified",
+      "field_changes": {
+        "summary": {
+          "old": "Create a Tax Calculation",
+          "new": "Create a Calculation"
+        },
+        "text": {
+          "old": "POST /v1/tax/calculations — Create a Tax Calculation",
+          "new": "POST /v1/tax/calculations — Create a Calculation"
+        },
+        "markdown": {
+          "old": "### POST /v1/tax/calculations\n**Summary:** Create a Tax Calculation\n**Description:** <p>Calculates tax based on the input and returns a Tax <code>Calculation</code> object.</p>",
+          "new": "### POST /v1/tax/calculations\n**Summary:** Create a Calculation\n**Description:** <p>Calculates tax based on the input and returns a Tax <code>Calculation</code> object.</p>"
+        }
+      },
+      "old_content_hash": "9d35649d4a3f7905225790f43c1f2c84211d3e0b9b5217e4ba07e34fa7a1f4cb",
+      "new_content_hash": "63c2bafca2a78ebe8d5e2ff6e151ad5c8583682e41fb46ca01f5d5915861db85"
+    },
+    {
+      "key": "POST:/v1/tax/transactions/create_from_calculation",
+      "change_type": "modified",
+      "field_changes": {
+        "summary": {
+          "old": "Create a transaction from a calculation",
+          "new": "Create a Transaction from a Calculation"
+        },
+        "text": {
+          "old": "POST /v1/tax/transactions/create_from_calculation — Create a transaction from a calculation",
+          "new": "POST /v1/tax/transactions/create_from_calculation — Create a Transaction from a Calculation"
+        },
+        "markdown": {
+          "old": "### POST /v1/tax/transactions/create_from_calculation\n**Summary:** Create a transaction from a calculation\n**Description:** <p>Creates a Tax Transaction from a calculation, if that calculation hasn’t expired. Calculations expire after 90 days.</p>",
+          "new": "### POST /v1/tax/transactions/create_from_calculation\n**Summary:** Create a Transaction from a Calculation\n**Description:** <p>Creates a Tax Transaction from a calculation, if that calculation hasn’t expired. Calculations expire after 90 days.</p>"
+        }
+      },
+      "old_content_hash": "cc5ab2a483ab1413decebf721cd101c033dbd1de87a31ff1e87e93eb43f79b8d",
+      "new_content_hash": "ab416abbee49d4b4eeff45ca0d90e11feac37b4909ee19bc76d51095f71238e9"
+    },
+    {
+      "key": "POST:/v1/subscriptions/{subscription}/resume",
+      "change_type": "modified",
+      "field_changes": {
+        "markdown": {
+          "old": "### POST /v1/subscriptions/{subscription}/resume\n**Summary:** Resume a subscription\n**Description:** <p>Initiates resumption of a paused subscription, optionally resetting the billing cycle anchor and creating prorations. If no resumption invoice is generated, the subscription becomes <code>active</code> immediately. If a resumption invoice is generated, the subscription remains <code>paused</code> until the invoice is paid or marked uncollectible. If the invoice is not paid by the expiration date, it is voided and the subscription remains <code>paused</code>.</p>",
+          "new": "### POST /v1/subscriptions/{subscription}/resume\n**Summary:** Resume a subscription\n**Description:** <p>Initiates resumption of a paused subscription, optionally resetting the billing cycle anchor and creating prorations. Resume is only available for subscriptions that use <code>charge_automatically</code> collection. If Stripe doesn’t generate a resumption invoice, the subscription becomes <code>active</code> immediately. When a resumption invoice is generated, Stripe finalizes it immediately. If the invoice is paid or marked uncollectible, the subscription becomes <code>active</code>. If the invoice is manually voided, the subscription stays <code>paused</code>. If there is no payment attempt within 23 hours, Stripe voids the invoice and the subscription stays <code>paused</code>. Learn more about <a href=\"/docs/billing/subscriptions/pause#resume-subscriptions\">resuming subscriptions</a>.</p>"
+        }
+      },
+      "old_content_hash": "9421098928542405be533090ab44c0ce17ef64665f24ef7a3cb7e2aab9758a6c",
+      "new_content_hash": "7cbae8a4246aac57c3b559e6fd0000a49d9802de382654e19ce1922977964067"
+    },
+    {
+      "key": "GET:/v1/tax/transactions/{transaction}",
+      "change_type": "modified",
+      "field_changes": {
+        "summary": {
+          "old": "Retrieve a transaction",
+          "new": "Retrieve a Transaction"
+        },
+        "text": {
+          "old": "GET /v1/tax/transactions/{transaction} — Retrieve a transaction",
+          "new": "GET /v1/tax/transactions/{transaction} — Retrieve a Transaction"
+        },
+        "markdown": {
+          "old": "### GET /v1/tax/transactions/{transaction}\n**Summary:** Retrieve a transaction\n**Description:** <p>Retrieves a Tax <code>Transaction</code> object.</p>",
+          "new": "### GET /v1/tax/transactions/{transaction}\n**Summary:** Retrieve a Transaction\n**Description:** <p>Retrieves a Tax <code>Transaction</code> object.</p>"
+        }
+      },
+      "old_content_hash": "a229180ec2e287eefab96ab18b883b7b291e17db1fda6c6155db094837fd051f",
+      "new_content_hash": "1f928d98b02e102a6d23162aa8213accf9aebdf79ff145604732d44d28177af4"
+    },
+    {
+      "key": "GET:/v1/tax/calculations/{calculation}/line_items",
+      "change_type": "modified",
+      "field_changes": {
+        "summary": {
+          "old": "Retrieve a calculation's line items",
+          "new": "Retrieve a Calculation's line items"
+        },
+        "text": {
+          "old": "GET /v1/tax/calculations/{calculation}/line_items — Retrieve a calculation's line items",
+          "new": "GET /v1/tax/calculations/{calculation}/line_items — Retrieve a Calculation's line items"
+        },
+        "markdown": {
+          "old": "### GET /v1/tax/calculations/{calculation}/line_items\n**Summary:** Retrieve a calculation's line items\n**Description:** <p>Retrieves the line items of a tax calculation as a collection, if the calculation hasn’t expired.</p>",
+          "new": "### GET /v1/tax/calculations/{calculation}/line_items\n**Summary:** Retrieve a Calculation's line items\n**Description:** <p>Retrieves the line items of a tax calculation as a collection, if the calculation hasn’t expired.</p>"
+        }
+      },
+      "old_content_hash": "f34f60b10b481f0ba126628ee1efee319c75114d575cb1cde99e1564ddb6604b",
+      "new_content_hash": "5635686043f4e4bd7f4db0e7821d8e8ca7d3e4247ce3bea9e561d42a719787cc"
+    },
+    {
+      "key": "GET:/v1/balance_transactions|param:type",
+      "change_type": "modified",
+      "field_changes": {
+        "markdown": {
+          "old": "- **type** (string, optional): Only returns transactions of the given type. One of: `adjustment`, `advance`, `advance_funding`, `anticipation_repayment`, `application_fee`, `application_fee_refund`, `charge`, `climate_order_purchase`, `climate_order_refund`, `connect_collection_transfer`, `contribution`, `issuing_authorization_hold`, `issuing_authorization_release`, `issuing_dispute`, `issuing_transaction`, `obligation_outbound`, `obligation_reversal_inbound`, `payment`, `payment_failure_refund`, `payment_network_reserve_hold`, `payment_network_reserve_release`, `payment_refund`, `payment_reversal`, `payment_unreconciled`, `payout`, `payout_cancel`, `payout_failure`, `payout_minimum_balance_hold`, `payout_minimum_balance_release`, `refund`, `refund_failure`, `reserve_transaction`, `reserved_funds`, `reserve_hold`, `reserve_release`, `stripe_fee`, `stripe_fx_fee`, `stripe_balance_payment_debit`, `stripe_balance_payment_debit_reversal`, `tax_fee`, `topup`, `topup_reversal`, `transfer`, `transfer_cancel`, `transfer_failure`, or `transfer_refund`.",
+          "new": "- **type** (string, optional): Only returns transactions of the given type. One of: `adjustment`, `advance`, `advance_funding`, `anticipation_repayment`, `application_fee`, `application_fee_refund`, `charge`, `climate_order_purchase`, `climate_order_refund`, `connect_collection_transfer`, `contribution`, `inbound_transfer`, `inbound_transfer_reversal`, `issuing_authorization_hold`, `issuing_authorization_release`, `issuing_dispute`, `issuing_transaction`, `obligation_outbound`, `obligation_reversal_inbound`, `payment`, `payment_failure_refund`, `payment_network_reserve_hold`, `payment_network_reserve_release`, `payment_refund`, `payment_reversal`, `payment_unreconciled`, `payout`, `payout_cancel`, `payout_failure`, `payout_minimum_balance_hold`, `payout_minimum_balance_release`, `refund`, `refund_failure`, `reserve_transaction`, `reserved_funds`, `reserve_hold`, `reserve_release`, `stripe_fee`, `stripe_fx_fee`, `stripe_balance_payment_debit`, `stripe_balance_payment_debit_reversal`, `tax_fee`, `topup`, `topup_reversal`, `transfer`, `transfer_cancel`, `transfer_failure`, `transfer_refund`, or `fee_credit_funding`."
+        }
+      },
+      "old_content_hash": "8e1aef4d98660f2ba69ad6770223dab97b33195df6996e8d3e4fc816c391e67a",
+      "new_content_hash": "fc0054fbd1cd3ee74b6f6c7a0b74b2426b882567ed86dbd4a7ea5dd26501f8fb"
+    },
+    {
+      "key": "GET:/v1/balance/history|param:type",
+      "change_type": "modified",
+      "field_changes": {
+        "markdown": {
+          "old": "- **type** (string, optional): Only returns transactions of the given type. One of: `adjustment`, `advance`, `advance_funding`, `anticipation_repayment`, `application_fee`, `application_fee_refund`, `charge`, `climate_order_purchase`, `climate_order_refund`, `connect_collection_transfer`, `contribution`, `issuing_authorization_hold`, `issuing_authorization_release`, `issuing_dispute`, `issuing_transaction`, `obligation_outbound`, `obligation_reversal_inbound`, `payment`, `payment_failure_refund`, `payment_network_reserve_hold`, `payment_network_reserve_release`, `payment_refund`, `payment_reversal`, `payment_unreconciled`, `payout`, `payout_cancel`, `payout_failure`, `payout_minimum_balance_hold`, `payout_minimum_balance_release`, `refund`, `refund_failure`, `reserve_transaction`, `reserved_funds`, `reserve_hold`, `reserve_release`, `stripe_fee`, `stripe_fx_fee`, `stripe_balance_payment_debit`, `stripe_balance_payment_debit_reversal`, `tax_fee`, `topup`, `topup_reversal`, `transfer`, `transfer_cancel`, `transfer_failure`, or `transfer_refund`.",
+          "new": "- **type** (string, optional): Only returns transactions of the given type. One of: `adjustment`, `advance`, `advance_funding`, `anticipation_repayment`, `application_fee`, `application_fee_refund`, `charge`, `climate_order_purchase`, `climate_order_refund`, `connect_collection_transfer`, `contribution`, `inbound_transfer`, `inbound_transfer_reversal`, `issuing_authorization_hold`, `issuing_authorization_release`, `issuing_dispute`, `issuing_transaction`, `obligation_outbound`, `obligation_reversal_inbound`, `payment`, `payment_failure_refund`, `payment_network_reserve_hold`, `payment_network_reserve_release`, `payment_refund`, `payment_reversal`, `payment_unreconciled`, `payout`, `payout_cancel`, `payout_failure`, `payout_minimum_balance_hold`, `payout_minimum_balance_release`, `refund`, `refund_failure`, `reserve_transaction`, `reserved_funds`, `reserve_hold`, `reserve_release`, `stripe_fee`, `stripe_fx_fee`, `stripe_balance_payment_debit`, `stripe_balance_payment_debit_reversal`, `tax_fee`, `topup`, `topup_reversal`, `transfer`, `transfer_cancel`, `transfer_failure`, `transfer_refund`, or `fee_credit_funding`."
+        }
+      },
+      "old_content_hash": "8e1aef4d98660f2ba69ad6770223dab97b33195df6996e8d3e4fc816c391e67a",
+      "new_content_hash": "fc0054fbd1cd3ee74b6f6c7a0b74b2426b882567ed86dbd4a7ea5dd26501f8fb"
+    },
+    {
+      "key": "POST:/v1/tax/transactions/create_reversal",
+      "change_type": "modified",
+      "field_changes": {
+        "summary": {
+          "old": "Create a reversal transaction",
+          "new": "Create a reversal Transaction"
+        },
+        "text": {
+          "old": "POST /v1/tax/transactions/create_reversal — Create a reversal transaction",
+          "new": "POST /v1/tax/transactions/create_reversal — Create a reversal Transaction"
+        },
+        "markdown": {
+          "old": "### POST /v1/tax/transactions/create_reversal\n**Summary:** Create a reversal transaction\n**Description:** <p>Partially or fully reverses a previously created <code>Transaction</code>.</p>",
+          "new": "### POST /v1/tax/transactions/create_reversal\n**Summary:** Create a reversal Transaction\n**Description:** <p>Partially or fully reverses a previously created <code>Transaction</code>.</p>"
+        }
+      },
+      "old_content_hash": "2f300d4b7dae898d5db5dd9a58f3e2f2532ed68cecedbde16ba023c39ba710ff",
+      "new_content_hash": "f75d0ff059e68e30789003967c8a17ae025fc0a505a1a52d98f1e440d2254be2"
+    },
+    {
+      "key": "GET:/v1/payment_method_configurations|param:active",
+      "change_type": "added",
+      "field_changes": null,
+      "old_content_hash": null,
+      "new_content_hash": "fdf52e6b136b0140d8b7eabc3a8f44733793da7ad15101228a943648026d0ad4"
+    },
+    {
+      "key": "GET:/v1/tax/calculations/{calculation}",
+      "change_type": "modified",
+      "field_changes": {
+        "summary": {
+          "old": "Retrieve a Tax Calculation",
+          "new": "Retrieve a Calculation"
+        },
+        "text": {
+          "old": "GET /v1/tax/calculations/{calculation} — Retrieve a Tax Calculation",
+          "new": "GET /v1/tax/calculations/{calculation} — Retrieve a Calculation"
+        },
+        "markdown": {
+          "old": "### GET /v1/tax/calculations/{calculation}\n**Summary:** Retrieve a Tax Calculation\n**Description:** <p>Retrieves a Tax <code>Calculation</code> object, if the calculation hasn’t expired.</p>",
+          "new": "### GET /v1/tax/calculations/{calculation}\n**Summary:** Retrieve a Calculation\n**Description:** <p>Retrieves a Tax <code>Calculation</code> object, if the calculation hasn’t expired.</p>"
+        }
+      },
+      "old_content_hash": "1ae5c794efc35ff6d58fcc0def878a39ad9e5ab321ae7c5f62591ce24a3b9a88",
+      "new_content_hash": "e6e353382bf84263d1d5168dfa6cd0785bc740ac01a90e2ccbd64b8b1d1bf56c"
+    },
+    {
+      "key": "GET:/v1/tax/transactions/{transaction}/line_items",
+      "change_type": "modified",
+      "field_changes": {
+        "summary": {
+          "old": "Retrieve a transaction's line items",
+          "new": "Retrieve a Transaction's line items"
+        },
+        "text": {
+          "old": "GET /v1/tax/transactions/{transaction}/line_items — Retrieve a transaction's line items",
+          "new": "GET /v1/tax/transactions/{transaction}/line_items — Retrieve a Transaction's line items"
+        },
+        "markdown": {
+          "old": "### GET /v1/tax/transactions/{transaction}/line_items\n**Summary:** Retrieve a transaction's line items\n**Description:** <p>Retrieves the line items of a committed standalone transaction as a collection.</p>",
+          "new": "### GET /v1/tax/transactions/{transaction}/line_items\n**Summary:** Retrieve a Transaction's line items\n**Description:** <p>Retrieves the line items of a committed standalone transaction as a collection.</p>"
+        }
+      },
+      "old_content_hash": "afba3e8bfbc86dc7a02d7a212976e8292a7a2bfdad78c468e24e52569ae8d1d1",
+      "new_content_hash": "59f2e3054537ca355548e7d3b75872f2907e6d1e26988eb8319ba9fdbe013cf4"
+    },
+    {
+      "key": "POST:/v1/terminal/refunds",
+      "change_type": "modified",
+      "field_changes": {
+        "markdown": {
+          "old": "### POST /v1/terminal/refunds\n**Summary:** Create a refund using a Terminal-supported device.\n**Description:** <p>Internal endpoint for terminal use to create a refund for a card_present charge.\nThis endpoint only supports card_present payment method types (excludes interac_present).</p>\n\n<p>You can optionally refund only part of a charge.</p>",
+          "new": "### POST /v1/terminal/refunds\n**Summary:** Create a refund using a Terminal-supported device.\n**Description:** <p>Internal endpoint for terminal use to create a refund for a card_present or card charge.</p>\n\n<p>You can optionally refund only part of a charge.</p>"
+        }
+      },
+      "old_content_hash": "83a76c81109d1593a007d04a62eb23ab8b166840488b193e44680b98c6e531ff",
+      "new_content_hash": "7cd67717f1e4efce1d8d93916316df11d28a6d7682e79fa80977df65fd70247f"
+    }
+  ],
+  "strategy": "deterministe",
+  "confidence": "exact"
+}

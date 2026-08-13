@@ -1,0 +1,262 @@
+#!/usr/bin/env python3
+"""Phase 5 — Baselines D/E/F (spec §9) : génération, abstention, conflits.
+
+Un seul passage par question à travers les composants Phase 4 (retrieve ->
+sufficiency -> generate -> conflict -> abstention), en réutilisant
+QueryPipeline._diff_explanation/_finalize_answer pour rester fidèle au vrai
+comportement de production, mais en capturant la génération BRUTE (avant
+abstention) séparément de la réponse finale (après abstention) — nécessaire
+pour distinguer les métriques Baseline D (avant abstention) de Baseline E
+(après abstention) à partir d'un seul run, sans dupliquer d'appels LLM.
+
+Baseline D = C + génération/citations/sufficiency : RAGAS (Faithfulness,
+             Answer Relevancy, Context Precision, Context Recall sur le
+             sous-ensemble annoté) + Hallucination Rate, sur la génération brute.
+Baseline E = D + abstention : mêmes métriques sur la réponse finale
+             (après AbstentionGate) + taux d'abstention correcte/incorrecte.
+Baseline F = E + détection de conflits : taux de conflits détectés sur les
+             questions version_conflict (requires_obsolescence_check=True,
+             où un conflit est attendu) vs sur les autres (où un conflit
+             signalé est un faux positif).
+
+Usage : --limit N pour un run partiel (smoke test avant le run complet).
+"""
+
+import argparse
+import json
+import sys
+import time
+from pathlib import Path
+
+_PROJECT_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(_PROJECT_ROOT))
+
+from qdrant_client import QdrantClient
+
+from src.config.settings import get_settings
+from src.embeddings.bge_m3 import BGEEmbedder
+from src.embeddings.vector_store import QdrantStore
+from src.evaluation import ragas_eval
+from src.evaluation.hallucination import hallucination_rate
+from src.generation.generator import Generator
+from src.llm.factory import LLMFactory
+from src.llm.interface import LLMConfig
+from src.llm.providers import ollama_client  # noqa: F401 — self-registers
+from src.pipeline import QueryPipeline
+from src.reliability.abstention import AbstentionGate
+from src.reliability.conflict.detector import ConflictDetector
+from src.reliability.sufficiency import SufficiencyChecker
+from src.retrieval.hybrid_retriever import HybridRetriever
+
+QUESTIONS_PATH = _PROJECT_ROOT / "data" / "eval" / "questions_v1.jsonl"
+OUT_PATH = _PROJECT_ROOT / "data" / "eval" / "baseline_D_E_F_results.json"
+RAW_OUT_PATH = _PROJECT_ROOT / "data" / "eval" / "baseline_D_E_F_raw.jsonl"
+
+CONFLICT_SUFFICIENCY_THRESHOLD = 0.7
+CONTEXT_PRECISION_MAX_CHUNKS = 3  # limite le coût judge (7b CPU) par question
+
+
+def build_components():
+    settings = get_settings()
+    client = QdrantClient(host=settings.qdrant_host, port=settings.qdrant_port)
+    store = QdrantStore(client=client, collection_name=settings.qdrant_collection_name)
+    embedder = BGEEmbedder(
+        model_name=settings.embedding_model,
+        dtype=settings.embedding_dtype,
+        backend=settings.embedding_backend,
+        device=settings.embedding_device,
+        batch_size=settings.embedding_batch_size,
+    )
+    retriever = HybridRetriever(store=store, embedder=embedder, use_reranker=True)
+
+    gen_config = LLMConfig(
+        provider=settings.llm_provider,
+        model=settings.llm_model,  # qwen2.5:3b-instruct — défaut projet
+        base_url=settings.llm_base_url,
+        temperature=settings.llm_temperature,
+        max_tokens=settings.llm_max_tokens,
+        timeout=settings.llm_timeout,
+    )
+    judge_config = LLMConfig(
+        provider="ollama",
+        model="qwen2.5:7b-instruct",
+        base_url=settings.llm_base_url,
+        temperature=0.1,
+        max_tokens=300,
+        num_gpu=0,  # juge indépendant, CPU — évite la contention VRAM et le biais d'auto-évaluation
+    )
+    gen_client = LLMFactory.create(gen_config)
+    judge_client = LLMFactory.create(judge_config)
+
+    generator = Generator(llm_client=gen_client, llm_config=gen_config)
+    sufficiency_checker = SufficiencyChecker(llm_client=gen_client)
+    abstention_gate = AbstentionGate()
+    conflict_detector = ConflictDetector(llm_client=gen_client, diff_dir=_PROJECT_ROOT / "data" / "diffs")
+
+    return {
+        "retriever": retriever,
+        "generator": generator,
+        "sufficiency_checker": sufficiency_checker,
+        "abstention_gate": abstention_gate,
+        "conflict_detector": conflict_detector,
+        "gen_config": gen_config,
+        "judge_client": judge_client,
+        "judge_config": judge_config,
+    }
+
+
+def run_one_question(components: dict, q: dict) -> dict:
+    retriever = components["retriever"]
+    gen_config = components["gen_config"]
+
+    t0 = time.perf_counter()
+    retrieval = retriever.retrieve(query=q["question"], top_k=10)
+    chunks = retrieval["results"]
+
+    sufficiency = components["sufficiency_checker"].check(q["question"], chunks, gen_config)
+    diff_explanation = QueryPipeline._diff_explanation(retrieval)
+    generation = components["generator"].generate(q["question"], chunks, diff_explanation=diff_explanation)
+
+    conflicts = []
+    if sufficiency.verdict != "insufficient" and sufficiency.confidence >= CONFLICT_SUFFICIENCY_THRESHOLD:
+        conflicts = components["conflict_detector"].detect_textual(chunks, gen_config)
+
+    reranker_scores = [c.get("rerank_score", c.get("score", 0.0)) for c in chunks]
+    decision = components["abstention_gate"].evaluate(
+        reranker_scores=reranker_scores,
+        generation_confidence=generation.confidence,
+        sufficiency_verdict=sufficiency,
+        planner_confidence=retrieval.get("confidence"),
+    )
+    final_answer, final_citations = QueryPipeline._finalize_answer(decision, generation)
+    latency_ms = (time.perf_counter() - t0) * 1000
+
+    context_text = "\n---\n".join(c.get("text", "") for c in chunks)
+    chunk_texts = [c.get("text", "") for c in chunks[:CONTEXT_PRECISION_MAX_CHUNKS]]
+
+    judge_client, judge_config = components["judge_client"], components["judge_config"]
+    faith = ragas_eval.faithfulness(judge_client, judge_config, q["question"], context_text, generation.answer)
+    relevancy = ragas_eval.answer_relevancy(judge_client, judge_config, q["question"], generation.answer)
+    ctx_precision = ragas_eval.context_precision(judge_client, judge_config, q["question"], chunk_texts)
+    ctx_recall = None
+    if q.get("expected_answer"):
+        ctx_recall = ragas_eval.context_recall(judge_client, judge_config, q["expected_answer"], context_text).score
+
+    return {
+        "question": q["question"],
+        "category": q["category"],
+        "requires_obsolescence_check": q.get("requires_obsolescence_check", False),
+        "expected_sources": q.get("expected_sources", []),
+        "raw_answer": generation.answer,
+        "raw_citations": [c.model_dump(mode="json") for c in generation.citations],
+        "final_answer": final_answer,
+        "final_citations": [c.model_dump(mode="json") for c in final_citations],
+        "zone": decision.zone,
+        "action": decision.action,
+        "sufficiency_verdict": sufficiency.verdict,
+        "n_conflicts": len(conflicts),
+        "conflict_types": [c.type for c in conflicts] if conflicts else [],
+        "faithfulness": faith.score,
+        "answer_relevancy": relevancy.score,
+        "context_precision": ctx_precision,
+        "context_recall": ctx_recall,
+        "latency_ms": latency_ms,
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--limit", type=int, default=None, help="Nombre de questions à traiter (smoke test)")
+    args = parser.parse_args()
+
+    questions = [json.loads(line) for line in QUESTIONS_PATH.read_text(encoding="utf-8").splitlines() if line.strip()]
+    if args.limit:
+        questions = questions[: args.limit]
+    print(f"Traitement de {len(questions)} questions...")
+
+    components = build_components()
+
+    records = []
+    RAW_OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(RAW_OUT_PATH, "w", encoding="utf-8") as raw_f:
+        for i, q in enumerate(questions, 1):
+            t0 = time.perf_counter()
+            try:
+                record = run_one_question(components, q)
+            except Exception as exc:
+                print(f"[{i}/{len(questions)}] ERREUR sur '{q['question'][:60]}': {exc}")
+                continue
+            records.append(record)
+            raw_f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            raw_f.flush()
+            dt = time.perf_counter() - t0
+            print(f"[{i}/{len(questions)}] ({dt:.1f}s) {q['category']:<18} zone={record['zone']:<10} "
+                  f"faith={record['faithfulness']:.2f} conflicts={record['n_conflicts']} -> {q['question'][:70]}")
+
+    # ---- Agrégation par baseline ----
+    def avg(key, subset=None):
+        vals = [r[key] for r in (subset or records) if r.get(key) is not None]
+        return sum(vals) / len(vals) if vals else None
+
+    # Hallucination Rate — objets simplifiés compatibles avec le protocole attendu
+    class _C:
+        def __init__(self, support_level): self.support_level = support_level
+    class _R:
+        def __init__(self, citations): self.citations = citations
+
+    def halluc(citations_key):
+        objs = [_R([_C(c["support_level"]) for c in r[citations_key]]) for r in records]
+        return hallucination_rate(objs)
+
+    baseline_d = {
+        "faithfulness": avg("faithfulness"),
+        "answer_relevancy": avg("answer_relevancy"),
+        "context_precision": avg("context_precision"),
+        "context_recall": avg("context_recall"),
+        "hallucination": halluc("raw_citations"),
+    }
+
+    abstention_qs = [r for r in records if r["category"] == "abstention"]
+    non_abstention_qs = [r for r in records if r["category"] != "abstention"]
+    correct_abstentions = sum(1 for r in abstention_qs if r["action"] == "abstain")
+    incorrect_abstentions = sum(1 for r in non_abstention_qs if r["action"] == "abstain")
+    baseline_e = {
+        "faithfulness": avg("faithfulness"),
+        "answer_relevancy": avg("answer_relevancy"),
+        "context_precision": avg("context_precision"),
+        "context_recall": avg("context_recall"),
+        "hallucination": halluc("final_citations"),
+        "correct_abstention_rate": (correct_abstentions / len(abstention_qs)) if abstention_qs else None,
+        "false_abstention_rate": (incorrect_abstentions / len(non_abstention_qs)) if non_abstention_qs else None,
+        "n_abstention_questions": len(abstention_qs),
+    }
+
+    version_conflict_qs = [r for r in records if r["requires_obsolescence_check"]]
+    other_qs = [r for r in records if not r["requires_obsolescence_check"]]
+    missed_conflicts = sum(1 for r in version_conflict_qs if r["n_conflicts"] == 0)
+    false_conflicts = sum(1 for r in other_qs if r["n_conflicts"] > 0)
+    baseline_f = {
+        **baseline_e,
+        "missed_conflict_rate": (missed_conflicts / len(version_conflict_qs)) if version_conflict_qs else None,
+        "false_conflict_rate": (false_conflicts / len(other_qs)) if other_qs else None,
+        "n_version_conflict_questions": len(version_conflict_qs),
+    }
+
+    results = {
+        "D_generation_citations_sufficiency": baseline_d,
+        "E_plus_abstention": baseline_e,
+        "F_plus_conflict_detection": baseline_f,
+        "_meta": {"n_questions": len(records), "n_requested": len(questions)},
+    }
+
+    with open(OUT_PATH, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2, ensure_ascii=False)
+
+    print("\n=== Résumé ===")
+    print(json.dumps(results, indent=2, ensure_ascii=False))
+    print(f"\nRésultats agrégés : {OUT_PATH}")
+    print(f"Détail par question : {RAW_OUT_PATH}")
+
+
+if __name__ == "__main__":
+    main()
