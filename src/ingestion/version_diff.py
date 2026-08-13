@@ -19,16 +19,19 @@ logger = structlog.get_logger(__name__)
 
 _DIFF_DIR = Path("data/diffs")
 
-# Types de nœuds "narratifs" diffés génériquement (hierarchy_path + position),
-# faute de clé sémantique naturelle comme METHOD:path pour une API. Miroir de
-# HierarchicalChunker._CONTENT_NODE_TYPES (src/ingestion/chunking/hierarchical.py)
-# sans le dépendre directement, pour ne pas coupler les deux modules.
+# Types de nœuds diffés génériquement (hierarchy_path + position), faute de
+# clé sémantique naturelle comme l'ancien METHOD:path (extraction OpenAPI
+# spécifique, retirée en Phase 5 — voir structured_data.py). Couvre
+# désormais aussi NodeType.DOCUMENT, le type des feuilles génériques
+# produites par StructuredDataBuilder (YAML/JSON de n'importe quelle forme,
+# endpoints d'API compris).
 _GENERIC_CONTENT_TYPES = {
     NodeType.PARAGRAPH,
     NodeType.LIST_ITEM,
     NodeType.TABLE,
     NodeType.CODE_BLOCK,
     NodeType.HEADING,
+    NodeType.DOCUMENT,
 }
 
 
@@ -118,50 +121,22 @@ class VersionDiffEngine:
     def _canonicalize(self, tree: DocumentTree) -> dict[str, dict[str, Any]]:
         """Extrait une représentation canonique indexée par clé sémantique.
 
-        Les sources API-shaped (endpoint/paramètre/réponse) ont une clé
-        sémantique naturelle et stable (METHOD:path). Les documents narratifs
-        (paragraphes, listes, tableaux, titres...) n'en ont pas — on retombe
-        sur `_generic_key` (hierarchy_path + position), moins robuste aux
-        insertions/suppressions mais reste déterministe, sans ML, conforme à
-        spec §8a."""
+        Plus de clé sémantique naturelle type METHOD:path (ancienne
+        extraction OpenAPI spécifique, retirée — voir structured_data.py) :
+        tout nœud de contenu, quel que soit le format d'origine, retombe sur
+        `_generic_key` (hierarchy_path + position) — déterministe, sans ML,
+        conforme à spec §8a."""
         result: dict[str, dict[str, Any]] = {}
         for node in tree.nodes.values():
-            if node.type == NodeType.API_ENDPOINT:
-                key = f"{node.metadata.get('method', 'UNKNOWN').upper()}:{node.metadata.get('path', 'unknown')}"
-                result[key] = {
-                    "text": node.text,
-                    "markdown": node.markdown,
-                    "content_hash": node.content_hash,
-                    "metadata": node.metadata,
-                }
-            elif node.type == NodeType.API_PARAMETER:
-                parent = tree.get_parent(node.id)
-                parent_key = f"{parent.metadata.get('method', 'UNKNOWN').upper()}:{parent.metadata.get('path', 'unknown')}" if parent else "UNKNOWN"
-                key = f"{parent_key}|param:{node.metadata.get('name', 'unknown')}"
-                result[key] = {
-                    "text": node.text,
-                    "markdown": node.markdown,
-                    "content_hash": node.content_hash,
-                    "metadata": node.metadata,
-                }
-            elif node.type == NodeType.API_RESPONSE:
-                parent = tree.get_parent(node.id)
-                parent_key = f"{parent.metadata.get('method', 'UNKNOWN').upper()}:{parent.metadata.get('path', 'unknown')}" if parent else "UNKNOWN"
-                key = f"{parent_key}|resp:{node.metadata.get('code', 'unknown')}"
-                result[key] = {
-                    "text": node.text,
-                    "markdown": node.markdown,
-                    "content_hash": node.content_hash,
-                    "metadata": node.metadata,
-                }
-            elif node.type in _GENERIC_CONTENT_TYPES:
-                key = self._generic_key(tree, node)
-                result[key] = {
-                    "text": node.text,
-                    "markdown": node.markdown,
-                    "content_hash": node.content_hash,
-                    "metadata": node.metadata,
-                }
+            if node.type not in _GENERIC_CONTENT_TYPES:
+                continue
+            key = self._generic_key(tree, node)
+            result[key] = {
+                "text": node.text,
+                "markdown": node.markdown,
+                "content_hash": node.content_hash,
+                "metadata": node.metadata,
+            }
         return result
 
     @staticmethod
