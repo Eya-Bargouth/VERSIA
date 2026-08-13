@@ -48,6 +48,11 @@ class LLMConfig(BaseModel):
     # OllamaClient/VLLMClient) — l'appelant ne manipule que ce schéma
     # générique, jamais le format spécifique d'un provider.
     response_format: dict | None = None
+    # Nombre de couches déchargées sur GPU (Ollama uniquement). 0 force le
+    # modèle entièrement sur CPU — utilisé pour le juge RAGAS (Phase 5) afin
+    # d'éviter toute contention VRAM avec le pipeline évalué. None laisse
+    # Ollama décider (comportement par défaut, inchangé).
+    num_gpu: int | None = None
 
 
 class BaseLLMClient(ABC):
