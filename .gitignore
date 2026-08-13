@@ -41,6 +41,8 @@ qdrant_storage/
 ollama_data/
 raw/
 !tests/fixtures/
+data/cache/
+
 
 # Logs
 *.log
