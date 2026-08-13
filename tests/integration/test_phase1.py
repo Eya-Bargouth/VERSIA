@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.config.manifest_schema import SourceManifest
+from src.config.source_config import SourceConfig
 from src.config.settings import Settings
 from src.dom.builders.markdown_builder import MarkdownBuilder
 from src.dom.builders.yaml_builder import YAMLBuilder
@@ -19,17 +19,15 @@ class TestPhase1Integration:
         assert settings.llm_provider in ("ollama", "vllm")
 
     def test_yaml_builder_then_mock_llm(self, sample_openapi_path, mock_llm_client):
-        manifest = SourceManifest(
-            source_id="stripe_test",
-            parser="yaml_structured",
-            scope={"include": ["*.yaml"]},
-        )
-        tree = YAMLBuilder().build(str(sample_openapi_path), manifest)
+        config = SourceConfig(source_id="stripe_test")
+        tree = YAMLBuilder().build(str(sample_openapi_path), config)
 
-        endpoints = tree.get_nodes_by_type(NodeType.API_ENDPOINT)
-        assert len(endpoints) > 0
+        # Plus de types API_ENDPOINT dédiés (extraction OpenAPI spécifique
+        # retirée en Phase 5) — tout passe par le type générique DOCUMENT.
+        docs = [d for d in tree.get_nodes_by_type(NodeType.DOCUMENT) if d.id != tree.root_id]
+        assert len(docs) > 0
 
-        context = endpoints[0].markdown or ""
+        context = docs[0].markdown or ""
         client = mock_llm_client()
         resp = client.complete(
             [
@@ -42,12 +40,8 @@ class TestPhase1Integration:
         assert len(resp.content) > 0
 
     def test_markdown_builder_then_mock_llm(self, sample_markdown_path, mock_llm_client):
-        manifest = SourceManifest(
-            source_id="owasp_test",
-            parser="markdown",
-            scope={"include": ["*.md"]},
-        )
-        tree = MarkdownBuilder().build(str(sample_markdown_path), manifest)
+        config = SourceConfig(source_id="owasp_test")
+        tree = MarkdownBuilder().build(str(sample_markdown_path), config)
 
         assert len(tree.get_nodes_by_type(NodeType.HEADING)) > 0
 
