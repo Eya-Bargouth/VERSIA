@@ -297,6 +297,7 @@ def main():
 
     retriever_no_rerank = HybridRetriever(store, use_reranker=False)
     retriever_with_rerank = HybridRetriever(store, use_reranker=True)
+    retriever_with_rerank.warm_up()  # charge le modèle avant les benchmarks chronométrés
 
     # Run benchmarks
     results = {}
