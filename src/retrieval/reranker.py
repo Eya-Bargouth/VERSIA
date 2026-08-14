@@ -59,6 +59,23 @@ class Reranker:
     # Public API
     # ------------------------------------------------------------------
 
+    def warm_up(self) -> None:
+        """Force le chargement du modèle (+ une inférence factice) tout de
+        suite plutôt que d'attendre le premier appel utilisateur — la
+        latence de chargement (souvent plusieurs secondes) doit être payée
+        au démarrage du service, pas mesurée dans la latence de la première
+        requête réelle. À appeler explicitement au démarrage (script ou
+        API), jamais automatiquement dans __init__ (romprait la rapidité
+        des tests unitaires qui construisent un Reranker sans vouloir
+        charger le modèle)."""
+        model = self._get_model()
+        if model is None:
+            return
+        try:
+            model.compute_score([["warm-up", "warm-up"]], normalize=True)
+        except Exception as exc:
+            logger.warning("reranker_warmup_inference_failed", error=str(exc))
+
     def rerank(
         self,
         query: str,
