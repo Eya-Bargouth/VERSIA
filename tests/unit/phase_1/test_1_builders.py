@@ -157,6 +157,36 @@ class TestMarkdownBuilder:
         errors = tree.validate_integrity()
         assert len(errors) == 0, f"Integrity errors: {errors}"
 
+    def test_tight_list_items_keep_their_text(self, tmp_path):
+        """Régression : markdown-it-py enveloppe le contenu d'un list_item
+        dans paragraph_open(hidden)/inline/paragraph_close(hidden) — un
+        "inline" ne suit jamais list_item_open directement. L'ancien code
+        supposait le contraire et produisait des LIST_ITEM au texte vide
+        pour toute liste "tight" (`- item`, sans ligne vide entre éléments),
+        le cas le plus courant en markdown."""
+        md_path = tmp_path / "tight_list.md"
+        md_path.write_text("# Titre\n\n- premier élément\n- second élément\n- troisième élément\n", encoding="utf-8")
+
+        config = SourceConfig(source_id="test_tight_list")
+        tree = MarkdownBuilder().build(str(md_path), config)
+
+        list_items = tree.get_nodes_by_type(NodeType.LIST_ITEM)
+        assert len(list_items) == 3
+        assert [item.text for item in list_items] == ["premier élément", "second élément", "troisième élément"]
+
+    def test_nested_list_items_still_extracted(self, tmp_path):
+        """Non-régression : la sous-liste doit rester traitée par la boucle
+        externe (pas avalée par le nouveau parsing du list_item parent)."""
+        md_path = tmp_path / "nested_list.md"
+        md_path.write_text("- item un\n- item deux\n  - item imbriqué\n- item trois\n", encoding="utf-8")
+
+        config = SourceConfig(source_id="test_nested_list")
+        tree = MarkdownBuilder().build(str(md_path), config)
+
+        list_items = tree.get_nodes_by_type(NodeType.LIST_ITEM)
+        texts = [item.text for item in list_items]
+        assert texts == ["item un", "item deux", "item imbriqué", "item trois"]
+
 
 class TestJSONBuilder:
     def test_supports_json(self):
@@ -285,3 +315,57 @@ class TestStructuredDataBuilderGeneric:
         post_docs = [d for d in non_root if "symbol" in (d.text or "")]
         assert len(post_docs) == 1
         assert "summary" in post_docs[0].text.lower() or "Create order" in post_docs[0].text
+
+
+class TestRefResolution:
+    """$ref (JSON Pointer interne, RFC 6901) doit être déréférencé avant le
+    parcours générique, pour qu'un paramètre partagé référencé par plusieurs
+    endpoints apparaisse dans le chunk de chacun plutôt que de nécessiter un
+    second chunk séparé pour être compris."""
+
+    def _config(self):
+        return SourceConfig(source_id="ref_test")
+
+    def test_referenced_parameter_is_inlined_into_endpoint_chunk(self, tmp_path):
+        path = tmp_path / "api.yaml"
+        path.write_text(
+            "openapi: '3.0.3'\n"
+            "components:\n"
+            "  parameters:\n"
+            "    SymbolParam:\n"
+            "      name: symbol\n"
+            "      required: true\n"
+            "      description: Trading pair symbol\n"
+            "paths:\n"
+            "  /v1/orders:\n"
+            "    get:\n"
+            "      summary: List orders\n"
+            "      parameters:\n"
+            "        - $ref: '#/components/parameters/SymbolParam'\n",
+            encoding="utf-8",
+        )
+        tree = YAMLBuilder().build(str(path), self._config())
+        docs = tree.get_nodes_by_type(NodeType.DOCUMENT)
+        non_root = [d for d in docs if d.id != tree.root_id]
+
+        endpoint_docs = [d for d in non_root if "List orders" in (d.text or "")]
+        assert len(endpoint_docs) == 1
+        assert "Trading pair symbol" in endpoint_docs[0].text
+        assert "$ref" not in endpoint_docs[0].text
+
+    def test_cycle_leaves_ref_untouched_instead_of_looping(self, tmp_path):
+        path = tmp_path / "cyclic.json"
+        path.write_text(
+            '{"defs": {"a": {"$ref": "#/defs/b"}, "b": {"$ref": "#/defs/a"}}, '
+            '"root_field": {"$ref": "#/defs/a"}}',
+            encoding="utf-8",
+        )
+        tree = JSONBuilder().build(str(path), self._config())
+        assert len(tree.validate_integrity()) == 0
+
+    def test_unresolvable_ref_left_as_is_without_crashing(self, tmp_path):
+        path = tmp_path / "broken.json"
+        path.write_text('{"item": {"$ref": "#/does/not/exist"}}', encoding="utf-8")
+        tree = JSONBuilder().build(str(path), self._config())
+        docs = tree.get_nodes_by_type(NodeType.DOCUMENT)
+        assert any("$ref" in (d.text or "") for d in docs if d.id != tree.root_id)
