@@ -91,10 +91,25 @@ class MarkdownBuilder(AbstractDOMBuilder):
                 i += 1
 
             elif token.type == "list_item_open":
+                # Le contenu direct d'un list_item est enveloppé dans un
+                # paragraph_open/inline/paragraph_close (masqué pour les
+                # listes "tight", visible sinon) — jamais un token "inline"
+                # directement après list_item_open. On ne consomme que ce
+                # wrapper, sans avancer jusqu'à list_item_close, pour laisser
+                # la boucle externe traiter normalement tout contenu imbriqué
+                # (sous-liste) qui suivrait avant la fermeture de cet item.
+                content = ""
                 i += 1
-                inline = tokens[i]
-                content = inline.content if inline.type == "inline" else ""
-                i += 1  # list_item_close
+                if i < len(tokens) and tokens[i].type == "paragraph_open":
+                    i += 1
+                    if i < len(tokens) and tokens[i].type == "inline":
+                        content = tokens[i].content
+                        i += 1
+                    if i < len(tokens) and tokens[i].type == "paragraph_close":
+                        i += 1
+                elif i < len(tokens) and tokens[i].type == "inline":
+                    content = tokens[i].content
+                    i += 1
                 item = DOMNode(
                     type=NodeType.LIST_ITEM,
                     source_id=config.source_id,
