@@ -37,9 +37,13 @@ import json
 from abc import abstractmethod
 from typing import Any
 
+import structlog
+
 from src.config.source_config import SourceConfig
 from src.dom.builders.base import AbstractDOMBuilder
 from src.dom.models import DOMNode, DocumentTree, NodeType
+
+logger = structlog.get_logger(__name__)
 
 # Taille max (caractères JSON sérialisés) d'un dict "mixte" avant qu'il ne
 # soit quand même décomposé clé par clé plutôt que dumpé entier. Générique —
@@ -47,6 +51,21 @@ from src.dom.models import DOMNode, DocumentTree, NodeType
 # description très longue) devienne un chunk inexploitable, sans référence
 # à aucun domaine documentaire particulier.
 _LEAF_SIZE_THRESHOLD = 2000
+
+# Profondeur max de résolution $ref en chaîne (ref -> cible contenant elle-
+# même un ref -> ...). Générique, pas liée à un schéma particulier : un
+# document au graphe de schémas densément interconnecté (composants qui se
+# référencent tous mutuellement, cas réel constaté sur le spec Stripe — ex.
+# PaymentIntent -> Charge -> Customer -> PaymentMethod -> ...) produit une
+# explosion combinatoire à la sérialisation JSON si on résout en chaîne sans
+# limite stricte : un objet partagé référencé depuis N endroits, chacun
+# référencé depuis M autres, doit être dupliqué en toutes lettres à chaque
+# occurrence (JSON n'a pas de notion de partage), ce qui fait exploser la
+# taille du texte de façon combinatoire avec la profondeur. Le cas visé par
+# la résolution (un paramètre référencé une fois par un endpoint) est un
+# seul niveau d'indirection — au-delà, le pointeur $ref est laissé tel quel
+# plutôt que de risquer un MemoryError sur un graphe de schémas dense.
+_MAX_REF_DEPTH = 1
 
 
 class StructuredDataBuilder(AbstractDOMBuilder):
@@ -59,6 +78,8 @@ class StructuredDataBuilder(AbstractDOMBuilder):
 
     def build(self, source_path: str, config: SourceConfig) -> DocumentTree:
         data = self._load(source_path)
+        self._ref_root = data
+        self._ref_cache: dict[str, Any] = {}
 
         root = self._create_root_node(source_path, config)
         tree = DocumentTree(root_id=root.id, source_id=config.source_id, source_path=source_path)
@@ -70,11 +91,77 @@ class StructuredDataBuilder(AbstractDOMBuilder):
         return tree
 
     # ------------------------------------------------------------------
+    # Résolution $ref (JSON Pointer interne au document) — mécanique
+    # générique du format YAML/JSON, pas une notion OpenAPI : un
+    # enregistrement référencé (ex. un paramètre partagé) doit apparaître
+    # dans le même chunk que l'enregistrement qui le référence, plutôt que
+    # de nécessiter deux chunks liés pour être compris.
+    #
+    # Appliquée localement (sur un seul nœud à la fois, au moment où il est
+    # examiné par le parcours), jamais en un seul pré-passage sur le
+    # document entier : un document dont les schémas se référencent
+    # massivement les uns les autres (composants tous interconnectés, cas
+    # réel constaté sur un spec OpenAPI volumineux) ferait sinon reconstruire
+    # récursivement la totalité du document une fois de plus rien que pour
+    # la résolution, en plus du parcours normal — coûteux sans bénéfice,
+    # puisque seuls les nœuds "feuille" (petits, déjà isolés par le parcours
+    # générique avant d'être sérialisés) ont réellement besoin d'être
+    # résolus. `_ref_cache` reste mémoïsé sur toute la durée d'un build().
+    # ------------------------------------------------------------------
+
+    def _resolve_refs(self, value: Any, source_path: str) -> Any:
+        """Remplace récursivement tout {"$ref": "#/a/b/c"} par le sous-arbre
+        pointé (JSON Pointer, RFC 6901) à l'intérieur de `value` seulement.
+        Seules les références internes au document ("#/...") sont résolues —
+        une référence vers un autre fichier est laissée telle quelle."""
+
+        def resolve_pointer(ref: str) -> Any:
+            node = self._ref_root
+            for raw_part in ref[2:].split("/"):
+                part = raw_part.replace("~1", "/").replace("~0", "~")
+                node = node[int(part)] if isinstance(node, list) else node[part]
+            return node
+
+        def walk(node: Any, seen: frozenset, depth: int) -> Any:
+            if isinstance(node, dict):
+                ref = node.get("$ref")
+                if isinstance(ref, str) and ref.startswith("#/"):
+                    if ref in self._ref_cache:
+                        return self._ref_cache[ref]
+                    if ref in seen:
+                        logger.warning("ref_cycle_detected", source_path=source_path, ref=ref)
+                        return node
+                    if depth >= _MAX_REF_DEPTH:
+                        logger.warning("ref_depth_limit_reached", source_path=source_path, ref=ref, depth=depth)
+                        return node
+                    try:
+                        target = resolve_pointer(ref)
+                    except (KeyError, IndexError, TypeError, ValueError):
+                        logger.warning("ref_resolution_failed", source_path=source_path, ref=ref)
+                        return node
+                    resolved = walk(target, seen | {ref}, depth + 1)
+                    self._ref_cache[ref] = resolved
+                    return resolved
+                return {key: walk(sub, seen, depth) for key, sub in node.items()}
+            if isinstance(node, list):
+                return [walk(item, seen, depth) for item in node]
+            return node
+
+        return walk(value, frozenset(), 0)
+
+    # ------------------------------------------------------------------
     # Parcours générique
     # ------------------------------------------------------------------
 
     def _walk_node(self, value: Any, config: SourceConfig, source_path: str, tree: DocumentTree, parent_id, path: str) -> None:
-        if isinstance(value, dict) and value and self._should_descend_dict(value):
+        # Substitution $ref au niveau conteneur (rare mais possible, ex. un
+        # chemin entier délégué via $ref) — bornée à ce seul nœud, avant de
+        # décider comment le traiter ; les $ref imbriqués plus profondément
+        # restent résolus paresseusement, au moment où le parcours les atteint.
+        if isinstance(value, dict) and set(value.keys()) == {"$ref"}:
+            value = self._resolve_refs(value, source_path)
+
+        if isinstance(value, dict) and value and self._should_descend_dict(value, source_path):
             for key, sub in value.items():
                 child_path = f"{path}.{key}" if path else str(key)
                 section = self._add_section(str(key), config, source_path, tree, parent_id)
@@ -89,16 +176,23 @@ class StructuredDataBuilder(AbstractDOMBuilder):
             return
 
         # Enregistrement (dict mixte, scalaire, ou liste de non-dicts) —
-        # feuille, dumpé entier, jamais fragmenté plus loin.
-        self._add_document_leaf(value, config, source_path, tree, parent_id, title=path or "document")
+        # feuille, dumpé entier, jamais fragmenté plus loin. Nœud borné
+        # (déjà isolé par le parcours ci-dessus) : c'est ici, sur un
+        # fragment de taille raisonnable plutôt que sur le document entier,
+        # que la résolution récursive complète des $ref est appliquée.
+        resolved = self._resolve_refs(value, source_path) if isinstance(value, (dict, list)) else value
+        self._add_document_leaf(resolved, config, source_path, tree, parent_id, title=path or "document")
 
-    def _should_descend_dict(self, value: dict) -> bool:
+    def _should_descend_dict(self, value: dict, source_path: str) -> bool:
         if self._is_pure_container(value):
             return True
         # Dict mixte : ne descend que s'il est trop volumineux pour rester
-        # un seul chunk (seuil générique, voir _LEAF_SIZE_THRESHOLD).
+        # un seul chunk (seuil générique, voir _LEAF_SIZE_THRESHOLD). $ref
+        # résolus ici (nœud déjà borné, pas le document entier) pour que la
+        # taille mesurée reflète le contenu réel, pas un pointeur brut.
+        resolved = self._resolve_refs(value, source_path)
         try:
-            size = len(json.dumps(value, ensure_ascii=False, default=str))
+            size = len(json.dumps(resolved, ensure_ascii=False, default=str))
         except (TypeError, ValueError):
             size = 0
         return size > _LEAF_SIZE_THRESHOLD
