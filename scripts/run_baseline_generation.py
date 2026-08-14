@@ -38,6 +38,7 @@ from src.embeddings.bge_m3 import BGEEmbedder
 from src.embeddings.vector_store import QdrantStore
 from src.evaluation import ragas_eval
 from src.evaluation.hallucination import hallucination_rate
+from src.evaluation.reliability_metrics import citation_accuracy, sufficiency_precision
 from src.generation.generator import Generator
 from src.llm.factory import LLMFactory
 from src.llm.interface import LLMConfig
@@ -54,6 +55,8 @@ RAW_OUT_PATH = _PROJECT_ROOT / "data" / "eval" / "baseline_D_E_F_raw.jsonl"
 
 CONFLICT_SUFFICIENCY_THRESHOLD = 0.7
 CONTEXT_PRECISION_MAX_CHUNKS = 3  # limite le coût judge (7b CPU) par question
+RETRY_MAX_ATTEMPTS = 2  # timeout Ollama / échec de validation JSON du juge sont transitoires
+RETRY_BACKOFF_SECONDS = 5
 
 
 def build_components():
@@ -68,6 +71,7 @@ def build_components():
         batch_size=settings.embedding_batch_size,
     )
     retriever = HybridRetriever(store=store, embedder=embedder, use_reranker=True)
+    retriever.warm_up()  # charge le reranker au démarrage, pas sur la première question chronométrée
 
     gen_config = LLMConfig(
         provider=settings.llm_provider,
@@ -88,7 +92,7 @@ def build_components():
     gen_client = LLMFactory.create(gen_config)
     judge_client = LLMFactory.create(judge_config)
 
-    generator = Generator(llm_client=gen_client, llm_config=gen_config)
+    generator = Generator(llm_client=gen_client, llm_config=gen_config, store=store)
     sufficiency_checker = SufficiencyChecker(llm_client=gen_client)
     abstention_gate = AbstentionGate()
     conflict_detector = ConflictDetector(llm_client=gen_client, diff_dir=_PROJECT_ROOT / "data" / "diffs")
@@ -135,12 +139,14 @@ def run_one_question(components: dict, q: dict) -> dict:
     chunk_texts = [c.get("text", "") for c in chunks[:CONTEXT_PRECISION_MAX_CHUNKS]]
 
     judge_client, judge_config = components["judge_client"], components["judge_config"]
+    precision_answer = q.get("expected_answer") or generation.answer
     faith = ragas_eval.faithfulness(judge_client, judge_config, q["question"], context_text, generation.answer)
-    relevancy = ragas_eval.answer_relevancy(judge_client, judge_config, q["question"], generation.answer)
-    ctx_precision = ragas_eval.context_precision(judge_client, judge_config, q["question"], chunk_texts)
+    relevancy = ragas_eval.answer_relevancy(judge_client, judge_config, q["question"], generation.answer, components["retriever"].embedder)
+    ctx_precision = ragas_eval.context_precision(judge_client, judge_config, q["question"], chunk_texts, precision_answer)
     ctx_recall = None
     if q.get("expected_answer"):
         ctx_recall = ragas_eval.context_recall(judge_client, judge_config, q["expected_answer"], context_text).score
+    cit_accuracy = citation_accuracy(judge_client, judge_config, generation.answer, generation.citations)
 
     return {
         "question": q["question"],
@@ -160,8 +166,27 @@ def run_one_question(components: dict, q: dict) -> dict:
         "answer_relevancy": relevancy.score,
         "context_precision": ctx_precision,
         "context_recall": ctx_recall,
+        "citation_accuracy": cit_accuracy["citation_accuracy"],
+        "should_abstain": q["category"] == "abstention",
         "latency_ms": latency_ms,
     }
+
+
+def run_one_question_with_retry(components: dict, q: dict) -> dict:
+    """Retry borné sur erreurs transitoires (timeout Ollama, échec de
+    validation JSON du juge) — auparavant une seule erreur perdait
+    silencieusement la question (8/50 dans l'évaluation Phase 5 d'origine),
+    sans distinction entre bug réel et aléa réseau/inférence."""
+    last_exc: Exception | None = None
+    for attempt in range(1, RETRY_MAX_ATTEMPTS + 1):
+        try:
+            return run_one_question(components, q)
+        except Exception as exc:
+            last_exc = exc
+            if attempt < RETRY_MAX_ATTEMPTS:
+                print(f"  -> échec (tentative {attempt}/{RETRY_MAX_ATTEMPTS}, {exc}), retry dans {RETRY_BACKOFF_SECONDS}s...")
+                time.sleep(RETRY_BACKOFF_SECONDS)
+    raise last_exc
 
 
 def main():
@@ -182,9 +207,9 @@ def main():
         for i, q in enumerate(questions, 1):
             t0 = time.perf_counter()
             try:
-                record = run_one_question(components, q)
+                record = run_one_question_with_retry(components, q)
             except Exception as exc:
-                print(f"[{i}/{len(questions)}] ERREUR sur '{q['question'][:60]}': {exc}")
+                print(f"[{i}/{len(questions)}] ERREUR (après {RETRY_MAX_ATTEMPTS} tentatives) sur '{q['question'][:60]}': {exc}")
                 continue
             records.append(record)
             raw_f.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -198,21 +223,29 @@ def main():
         vals = [r[key] for r in (subset or records) if r.get(key) is not None]
         return sum(vals) / len(vals) if vals else None
 
-    # Hallucination Rate — objets simplifiés compatibles avec le protocole attendu
-    class _C:
-        def __init__(self, support_level): self.support_level = support_level
+    # Hallucination Rate — objets simplifiés compatibles avec le protocole attendu.
+    # `faithfulness` vient du juge indépendant (ragas_eval.faithfulness, déjà
+    # calculé par question ci-dessus), pas d'une auto-déclaration du générateur.
     class _R:
-        def __init__(self, citations): self.citations = citations
+        def __init__(self, citations, faithfulness):
+            self.citations = citations
+            self.faithfulness = faithfulness
 
     def halluc(citations_key):
-        objs = [_R([_C(c["support_level"]) for c in r[citations_key]]) for r in records]
+        objs = [_R(r[citations_key], r["faithfulness"]) for r in records]
         return hallucination_rate(objs)
+
+    # Sufficiency Precision (spec §15.3) — indépendante de D/E/F (porte sur
+    # le verdict de SufficiencyChecker, calculé avant génération/abstention).
+    suff_precision = sufficiency_precision(records)
 
     baseline_d = {
         "faithfulness": avg("faithfulness"),
         "answer_relevancy": avg("answer_relevancy"),
         "context_precision": avg("context_precision"),
         "context_recall": avg("context_recall"),
+        "citation_accuracy": avg("citation_accuracy"),
+        "sufficiency_precision": suff_precision["sufficiency_precision"],
         "hallucination": halluc("raw_citations"),
     }
 
@@ -225,6 +258,8 @@ def main():
         "answer_relevancy": avg("answer_relevancy"),
         "context_precision": avg("context_precision"),
         "context_recall": avg("context_recall"),
+        "citation_accuracy": avg("citation_accuracy"),
+        "sufficiency_precision": suff_precision["sufficiency_precision"],
         "hallucination": halluc("final_citations"),
         "correct_abstention_rate": (correct_abstentions / len(abstention_qs)) if abstention_qs else None,
         "false_abstention_rate": (incorrect_abstentions / len(non_abstention_qs)) if non_abstention_qs else None,
