@@ -40,19 +40,28 @@ class HybridRetriever:
         store: QdrantStore,
         embedder=None,
         llm_client=None,
+        llm_config=None,
         use_reranker: bool = True,
         reranker_model: str = "BAAI/bge-reranker-v2-m3",
     ):
         self.store = store
         self.embedder = embedder
         self.llm_client = llm_client
+        self.llm_config = llm_config
         self.use_reranker = use_reranker
 
-        self.planner = QueryPlanner(llm_client=llm_client)
+        self.planner = QueryPlanner(llm_client=llm_client, llm_config=llm_config)
         self.dense_search = DenseSearch(store)
         self.sparse_search = SparseSearch(store)
         self.reranker = Reranker(model_name=reranker_model)
         self.version_diff_engine = VersionDiffEngine()
+
+    def warm_up(self) -> None:
+        """Charge le reranker immédiatement plutôt qu'au premier retrieve()
+        — à appeler explicitement au démarrage (script ou API), pas
+        automatiquement ici (romprait la rapidité des tests unitaires)."""
+        if self.use_reranker:
+            self.reranker.warm_up()
 
     # ------------------------------------------------------------------
     # Main entry point
