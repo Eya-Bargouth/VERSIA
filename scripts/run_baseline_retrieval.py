@@ -83,6 +83,7 @@ def main():
 
     retriever_no_rerank = HybridRetriever(store=store, embedder=embedder, use_reranker=False)
     retriever_with_rerank = HybridRetriever(store=store, embedder=embedder, use_reranker=True)
+    retriever_with_rerank.warm_up()  # charge le modèle avant la boucle chronométrée, pas pendant
 
     def to_result_list(retrieve_output: dict) -> list[dict]:
         return retrieve_output.get("results", [])
