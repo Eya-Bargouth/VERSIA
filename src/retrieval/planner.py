@@ -4,12 +4,20 @@ import re
 from typing import Optional, Dict, Any
 
 import structlog
+from pydantic import BaseModel, Field
+
+from src.llm.interface import LLMConfig, LLMMessage
 
 logger = structlog.get_logger(__name__)
 
 
+class _IntentClassification(BaseModel):
+    intent: str = Field(description="one of: factual, comparative, navigational, ambiguous")
+
+
 class QueryPlanner:
-    """Simple rule-based query planning.
+    """Simple rule-based query planning, avec fallback LLM optionnel quand
+    les règles ne tranchent pas (intent "ambiguous").
 
     plan(query: str) -> dict with keys: intent, entity (optional), filters (dict)
     """
@@ -17,9 +25,36 @@ class QueryPlanner:
     ENDPOINT_RE = re.compile(r"\b(GET|POST|PUT|DELETE|PATCH)\b\s*(/[-\w@%\.:\{\}/~+]*)", re.IGNORECASE)
     PATH_RE = re.compile(r"/[-\w@%\.:\{\}/~+]+")
 
+    # Élargi au-delà de la liste fixe initiale (compare/difference/vs/versus/
+    # between/différ) qui manquait des formulations courantes ("which is
+    # better", "distinguish", "par rapport à", "lequel est meilleur"...).
+    # \b évite les faux positifs de sous-chaîne (ex. "vs" dans un autre mot).
+    COMPARATIVE_RE = re.compile(
+        r"\b("
+        r"compar\w*|comparaison\w*|difference\w*|differs?|différenc\w*|différ\w*"
+        r"|distinguish\w*|contrast\w*"
+        r"|vs\.?|versus"
+        r"|better than|which (?:is|one is) (?:better|best)|lequel est (?:le )?meilleur"
+        r"|meilleur(?:e)? que|par rapport (?:à|a)"
+        r")\b",
+        re.IGNORECASE,
+    )
+    COMPARATIVE_BETWEEN_RE = re.compile(r"\bbetween\b.+\band\b", re.IGNORECASE)
+    COMPARATIVE_ENTRE_ET_RE = re.compile(r"\bentre\b.+\bet\b", re.IGNORECASE)
+
+    _INTENT_CLASSIFICATION_SYSTEM = (
+        "Classe l'intention de la question suivante en une seule catégorie : "
+        "'comparative' (demande explicitement de comparer deux choses, "
+        "versions ou options), 'navigational' (cherche à localiser un "
+        "document ou une section), 'factual' (cherche un fait précis), ou "
+        "'ambiguous' (aucune des précédentes ne s'applique clairement). "
+        "Réponds en JSON {intent}."
+    )
+
     def __init__(
         self,
         llm_client=None,
+        llm_config: Optional[LLMConfig] = None,
         source_aliases: Optional[Dict[str, str]] = None,
         version_tags: Optional[list] = None,
     ):
@@ -27,6 +62,10 @@ class QueryPlanner:
         Args:
             llm_client: Optional BaseLLMClient used as fallback when intent is
                 ambiguous.
+            llm_config: LLMConfig required alongside llm_client to actually
+                perform the fallback call (provider/model/base_url). Without
+                it, llm_client is accepted but never invoked — plan() stays
+                purely rule-based.
             source_aliases: Optional {keyword_lowercase: source_id} map used to
                 detect a source filter from the query text.
             version_tags: Optional list of known version tags (e.g. "v2323")
@@ -39,6 +78,7 @@ class QueryPlanner:
                 override, see SourceConfig).
         """
         self.llm_client = llm_client
+        self.llm_config = llm_config
         needs_discovery = source_aliases is None or version_tags is None
         discovered_aliases, discovered_versions = (
             self._discover_source_index() if needs_discovery else ({}, [])
@@ -80,6 +120,25 @@ class QueryPlanner:
                     version_tags.append(tag)
         return aliases, version_tags
 
+    def _classify_intent_llm(self, query: str) -> Optional[str]:
+        """Fallback LLM pour les questions que les règles ne parviennent pas
+        à classer. Ne lève jamais — une panne du juge dégrade silencieusement
+        vers "ambiguous" (déjà le verdict courant à ce stade), jamais un crash."""
+        try:
+            config = self.llm_config.model_copy(update={"response_format": _IntentClassification.model_json_schema()})
+            messages = [
+                LLMMessage(role="system", content=self._INTENT_CLASSIFICATION_SYSTEM),
+                LLMMessage(role="user", content=query),
+            ]
+            response = self.llm_client.complete(messages, config)
+            result = _IntentClassification.model_validate_json(response.content)
+        except Exception as exc:
+            logger.warning("planner_llm_classification_failed", error=str(exc))
+            return None
+        if result.intent in ("factual", "comparative", "navigational", "ambiguous"):
+            return result.intent
+        return None
+
     def plan(self, query: str) -> Dict[str, Any]:
         """Plan retrieval strategy from query.
 
@@ -93,7 +152,11 @@ class QueryPlanner:
         lower = q.lower()
 
         # Comparative detection
-        if any(w in lower for w in ("compare", "difference", "vs", "versus", "between", "différ")):
+        if (
+            self.COMPARATIVE_RE.search(lower)
+            or self.COMPARATIVE_BETWEEN_RE.search(lower)
+            or self.COMPARATIVE_ENTRE_ET_RE.search(lower)
+        ):
             intent = "comparative"
         # Navigational
         elif any(w in lower for w in ("where is", "show me", "find", "open", "locate", "où")):
@@ -103,6 +166,14 @@ class QueryPlanner:
             intent = "factual"
         else:
             intent = "ambiguous"
+
+        # Fallback LLM — seulement quand les règles ne tranchent pas, et
+        # seulement si un client ET une config ont été fournis (sinon
+        # plan() reste purement rule-based, comportement par défaut inchangé).
+        if intent == "ambiguous" and self.llm_client is not None and self.llm_config is not None:
+            llm_intent = self._classify_intent_llm(q)
+            if llm_intent is not None:
+                intent = llm_intent
 
         # Extract entity (HTTP method+path or just path)
         entity = None
