@@ -21,9 +21,10 @@ class Generator:
     """Génère une réponse structurée (answer/citations/confidence/sufficiency_score)
     à partir d'une question et des chunks retrouvés."""
 
-    def __init__(self, llm_client: BaseLLMClient, llm_config: LLMConfig):
+    def __init__(self, llm_client: BaseLLMClient, llm_config: LLMConfig, store=None):
         self.llm_client = llm_client
         self.llm_config = llm_config
+        self.store = store
 
     def generate(
         self,
@@ -31,7 +32,7 @@ class Generator:
         chunks: list[dict],
         diff_explanation: str | None = None,
     ) -> GenerationResult:
-        user_message = build_user_message(question, chunks, diff_explanation)
+        user_message = build_user_message(question, chunks, diff_explanation, store=self.store)
         messages = [
             LLMMessage(role="system", content=SYSTEM_PROMPT),
             LLMMessage(role="user", content=user_message),
