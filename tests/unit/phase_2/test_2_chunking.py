@@ -95,3 +95,26 @@ class TestHierarchicalChunking:
         # Vérifie que complete() a bien été appelé au moins une fois
         assert client.complete.called
         assert any("Contexte API Orders" in c.contextual_prefix for c in chunks)
+
+    def test_leaf_chunks_get_linked_to_structural_parent_chunk(self, sample_openapi_path):
+        """Régression : _link_chunk_hierarchy comparait chunk.node_ids[0]
+        (str, ex. "9ce0eb5-...") directement contre tree.nodes (indexé par
+        UUID) sans reconversion — .get() ne trouvait jamais rien, si bien
+        qu'AUCUN chunk n'obtenait jamais de parent_chunk_id, sur aucune
+        source, silencieusement (bug trouvé en testant l'expansion parent
+        explicite via Qdrant, audit #15)."""
+        config = SourceConfig(source_id="test_api")
+        tree = YAMLBuilder().build(str(sample_openapi_path), config)
+        chunker = HierarchicalChunker(prefix_method="deterministic")
+        chunks = chunker.chunk(tree)
+
+        leaf_chunks = [c for c in chunks if c.metadata.node_type == NodeType.DOCUMENT and c.raw_text]
+        with_parent = [c for c in leaf_chunks if c.parent_chunk_id is not None]
+        assert with_parent, "aucun chunk feuille n'a de parent_chunk_id — la liaison hiérarchique est cassée"
+
+        # Le parent référencé doit réellement exister parmi les chunks produits,
+        # et lister l'enfant dans ses child_chunk_ids (lien bidirectionnel).
+        chunk_by_id = {c.chunk_id: c for c in chunks}
+        child = with_parent[0]
+        parent = chunk_by_id[child.parent_chunk_id]
+        assert child.chunk_id in parent.child_chunk_ids
