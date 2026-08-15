@@ -1,0 +1,93 @@
+{
+  "source_id": "stripe_specs",
+  "version_from": "legacy",
+  "version_to": "v2323",
+  "changes": [
+    {
+      "key": "GET:/v1/payment_intents/search|param:query",
+      "change_type": "modified",
+      "field_changes": {
+        "markdown": {
+          "old": "- **query** (string, required): The search query string. See [search query language](https://docs.stripe.com/search#search-query-language) and the list of supported [query fields for payment intents](https://docs.stripe.com/search#query-fields-for-paymentintents).",
+          "new": "- **query** (string, required): The search query string. See [search query language](https://docs.stripe.com/search#search-query-language) and the list of supported [query fields for payment intents](https://docs.stripe.com/search#query-fields-for-payment-intents)."
+        }
+      },
+      "old_content_hash": "88c65f4077e0a51da7a99f03406727e00163d244d0c3c89fc959476166f378ec",
+      "new_content_hash": "ed33573bb046414504bf809d41a12b1eef0205c6729ad9dc5302aa227458e19b"
+    },
+    {
+      "key": "POST:/v1/credit_notes",
+      "change_type": "modified",
+      "field_changes": {
+        "markdown": {
+          "old": "### POST /v1/credit_notes\n**Summary:** Create a credit note\n**Description:** <p>Issue a credit note to adjust the amount of a finalized invoice. A credit note will first reduce the invoice’s <code>amount_remaining</code> (and <code>amount_due</code>), but not below zero.\nThis amount is indicated by the credit note’s <code>pre_payment_amount</code>. The excess amount is indicated by <code>post_payment_amount</code>, and it can result in any combination of the following:</p>\n\n<ul>\n<li>Refunds: create a new refund (using <code>refund_amount</code>) or link existing refunds (using <code>refunds</code>).</li>\n<li>Customer balance credit: credit the customer’s balance (using <code>credit_amount</code>) which will be automatically applied to their next invoice when it’s finalized.</li>\n<li>Outside of Stripe credit: record the amount that is or will be credited outside of Stripe (using <code>out_of_band_amount</code>).</li>\n</ul>\n\n<p>The sum of refunds, customer balance credits, and outside of Stripe credits must equal the <code>post_payment_amount</code>.</p>\n\n<p>You may issue multiple credit notes for an invoice. Each credit note may increment the invoice’s <code>pre_payment_credit_notes_amount</code>,\n<code>post_payment_credit_notes_amount</code>, or both, depending on the invoice’s <code>amount_remaining</code> at the time of credit note creation.</p>\n\n<p>For invoices that also have refunds created through the <a href=\"/docs/api/refunds\">Refund API</a>, the credit note API subtracts those refund amounts from the maximum creditable amount. This prevents the combined credit notes and refunds from exceeding the invoice amount. If you use both, ensure the combined total does not exceed the invoice’s paid amount.</p>",
+          "new": "### POST /v1/credit_notes\n**Summary:** Create a credit note\n**Description:** <p>Issue a credit note to adjust the amount of a finalized invoice. A credit note will first reduce the invoice’s <code>amount_remaining</code> (and <code>amount_due</code>), but not below zero.\nThis amount is indicated by the credit note’s <code>pre_payment_amount</code>. The excess amount is indicated by <code>post_payment_amount</code>, and it can result in any combination of the following:</p>\n\n<ul>\n<li>Refunds: create a new refund (using <code>refund_amount</code>) or link existing refunds (using <code>refunds</code>).</li>\n<li>Customer balance credit: credit the customer’s balance (using <code>credit_amount</code>) which will be automatically applied to their next invoice when it’s finalized.</li>\n<li>Outside of Stripe credit: record the amount that is or will be credited outside of Stripe (using <code>out_of_band_amount</code>).</li>\n</ul>\n\n<p>The sum of refunds, customer balance credits, and outside of Stripe credits must equal the <code>post_payment_amount</code>.</p>\n\n<p>You may issue multiple credit notes for an invoice. Each credit note may increment the invoice’s <code>pre_payment_credit_notes_amount</code>,\n<code>post_payment_credit_notes_amount</code>, or both, depending on the invoice’s <code>amount_remaining</code> at the time of credit note creation.</p>"
+        }
+      },
+      "old_content_hash": "9becaab900c2e66118e85b54a6c6f76b3a4003b007ba94b00e177395d5cb8835",
+      "new_content_hash": "c46fa2e0121dbbf25e036e5e56ef359b7bac099cf7196200f475a16a6b71c4df"
+    },
+    {
+      "key": "GET:/v1/balance/history",
+      "change_type": "modified",
+      "field_changes": {
+        "markdown": {
+          "old": "### GET /v1/balance/history\n**Summary:** List all balance transactions\n**Description:** <p>Returns a list of transactions that have contributed to the Stripe account balance (for example, charges, transfers, and so on). The transactions return in sorted order, with the most recent transactions appearing first.</p>\n\n<p>The previous name of this endpoint was “Balance history,” and it used the path <code>/v1/balance/history</code>.</p>",
+          "new": "### GET /v1/balance/history\n**Summary:** List all balance transactions\n**Description:** <p>Returns a list of transactions that have contributed to the Stripe account balance (e.g., charges, transfers, and so forth). The transactions are returned in sorted order, with the most recent transactions appearing first.</p>\n\n<p>Note that this endpoint was previously called “Balance history” and used the path <code>/v1/balance/history</code>.</p>"
+        }
+      },
+      "old_content_hash": "02bf5bfc361b4ed2cde37ba786c37d021e2d0df003178fd93f30cdc13be5511b",
+      "new_content_hash": "612864455d20350e366e6c7e93756bc451b522553fafa34fe28d4f7866b862b7"
+    },
+    {
+      "key": "DELETE:/v1/subscriptions/{subscription_exposed_id}",
+      "change_type": "modified",
+      "field_changes": {
+        "markdown": {
+          "old": "### DELETE /v1/subscriptions/{subscription_exposed_id}\n**Summary:** Cancel a subscription\n**Description:** <p>Cancels a customer’s subscription immediately. The customer won’t be charged again for the subscription. After it’s canceled, the subscription is largely immutable. You can still update its <a href=\"/metadata\">metadata</a> and <code>cancellation_details</code>.</p>\n\n<p>Any pending invoice items that you’ve created are still charged at the end of the period, unless manually <a href=\"/api/invoiceitems/delete\">deleted</a>. If you’ve set the subscription to cancel at the end of the period, any pending prorations are also left in place and collected at the end of the period. But if the subscription is set to cancel immediately, pending prorations are removed if <code>invoice_now</code> and <code>prorate</code> are both set to false.</p>\n\n<p>By default, upon subscription cancellation, Stripe stops automatic collection of all finalized invoices for the customer. This is intended to prevent unexpected payment attempts after the customer has canceled a subscription. However, you can resume automatic collection of the invoices manually after subscription cancellation to have us proceed. Or, you could check for unpaid invoices before allowing the customer to cancel the subscription at all.</p>",
+          "new": "### DELETE /v1/subscriptions/{subscription_exposed_id}\n**Summary:** Cancel a subscription\n**Description:** <p>Cancels a customer’s subscription immediately. The customer won’t be charged again for the subscription. After it’s canceled, the subscription is largely immutable. You can still update its <a href=\"/metadata\">metadata</a> and <code>cancellation_details</code>.</p>\n\n<p>Any pending invoice items that you’ve created are still charged at the end of the period, unless manually <a href=\"/api/invoiceitems/delete\">deleted</a>. If you’ve set the subscription to cancel at the end of the period, any pending prorations are also left in place and collected at the end of the period. But if the subscription is set to cancel immediately, pending prorations are removed if <code>invoice_now</code> and <code>prorate</code> are both set to true.</p>\n\n<p>By default, upon subscription cancellation, Stripe stops automatic collection of all finalized invoices for the customer. This is intended to prevent unexpected payment attempts after the customer has canceled a subscription. However, you can resume automatic collection of the invoices manually after subscription cancellation to have us proceed. Or, you could check for unpaid invoices before allowing the customer to cancel the subscription at all.</p>"
+        }
+      },
+      "old_content_hash": "70620573b34aa4c29168f06ac9469b09f424836377ad5514f5b412681bca25c5",
+      "new_content_hash": "80564ed11a9e67a45dce349852260346190f5614d210f19881bd77ae522c36ee"
+    },
+    {
+      "key": "GET:/v1/balance_transactions|param:type",
+      "change_type": "modified",
+      "field_changes": {
+        "markdown": {
+          "old": "- **type** (string, optional): Only returns transactions of the given type. One of: `tax_fund`, `adjustment`, `advance`, `advance_funding`, `anticipation_repayment`, `application_fee`, `application_fee_refund`, `charge`, `climate_order_purchase`, `climate_order_refund`, `connect_collection_transfer`, `contribution`, `inbound_transfer`, `inbound_transfer_reversal`, `issuing_authorization_hold`, `issuing_authorization_release`, `issuing_dispute`, `issuing_transaction`, `obligation_outbound`, `obligation_reversal_inbound`, `payment`, `payment_failure_refund`, `payment_network_reserve_hold`, `payment_network_reserve_release`, `payment_refund`, `payment_reversal`, `payment_unreconciled`, `payout`, `payout_cancel`, `payout_failure`, `payout_minimum_balance_hold`, `payout_minimum_balance_release`, `refund`, `refund_failure`, `reserve_transaction`, `reserved_funds`, `reserve_hold`, `reserve_release`, `stripe_fee`, `stripe_fx_fee`, `stripe_balance_payment_debit`, `stripe_balance_payment_debit_reversal`, `tax_fee`, `topup`, `topup_reversal`, `transfer`, `transfer_cancel`, `transfer_failure`, `transfer_refund`, or `fee_credit_funding`.",
+          "new": "- **type** (string, optional): Only returns transactions of the given type. One of: `adjustment`, `advance`, `advance_funding`, `anticipation_repayment`, `application_fee`, `application_fee_refund`, `charge`, `climate_order_purchase`, `climate_order_refund`, `connect_collection_transfer`, `contribution`, `inbound_transfer`, `inbound_transfer_reversal`, `issuing_authorization_hold`, `issuing_authorization_release`, `issuing_dispute`, `issuing_transaction`, `obligation_outbound`, `obligation_reversal_inbound`, `payment`, `payment_failure_refund`, `payment_network_reserve_hold`, `payment_network_reserve_release`, `payment_refund`, `payment_reversal`, `payment_unreconciled`, `payout`, `payout_cancel`, `payout_failure`, `payout_minimum_balance_hold`, `payout_minimum_balance_release`, `refund`, `refund_failure`, `reserve_transaction`, `reserved_funds`, `reserve_hold`, `reserve_release`, `stripe_fee`, `stripe_fx_fee`, `stripe_balance_payment_debit`, `stripe_balance_payment_debit_reversal`, `tax_fee`, `topup`, `topup_reversal`, `transfer`, `transfer_cancel`, `transfer_failure`, `transfer_refund`, or `fee_credit_funding`."
+        }
+      },
+      "old_content_hash": "5bba7f80a8fe7ac97eb154bf0f7e0808b426994d92e19b45e95fcaa052993a69",
+      "new_content_hash": "fc0054fbd1cd3ee74b6f6c7a0b74b2426b882567ed86dbd4a7ea5dd26501f8fb"
+    },
+    {
+      "key": "GET:/v1/balance/history|param:type",
+      "change_type": "modified",
+      "field_changes": {
+        "markdown": {
+          "old": "- **type** (string, optional): Only returns transactions of the given type. One of: `tax_fund`, `adjustment`, `advance`, `advance_funding`, `anticipation_repayment`, `application_fee`, `application_fee_refund`, `charge`, `climate_order_purchase`, `climate_order_refund`, `connect_collection_transfer`, `contribution`, `inbound_transfer`, `inbound_transfer_reversal`, `issuing_authorization_hold`, `issuing_authorization_release`, `issuing_dispute`, `issuing_transaction`, `obligation_outbound`, `obligation_reversal_inbound`, `payment`, `payment_failure_refund`, `payment_network_reserve_hold`, `payment_network_reserve_release`, `payment_refund`, `payment_reversal`, `payment_unreconciled`, `payout`, `payout_cancel`, `payout_failure`, `payout_minimum_balance_hold`, `payout_minimum_balance_release`, `refund`, `refund_failure`, `reserve_transaction`, `reserved_funds`, `reserve_hold`, `reserve_release`, `stripe_fee`, `stripe_fx_fee`, `stripe_balance_payment_debit`, `stripe_balance_payment_debit_reversal`, `tax_fee`, `topup`, `topup_reversal`, `transfer`, `transfer_cancel`, `transfer_failure`, `transfer_refund`, or `fee_credit_funding`.",
+          "new": "- **type** (string, optional): Only returns transactions of the given type. One of: `adjustment`, `advance`, `advance_funding`, `anticipation_repayment`, `application_fee`, `application_fee_refund`, `charge`, `climate_order_purchase`, `climate_order_refund`, `connect_collection_transfer`, `contribution`, `inbound_transfer`, `inbound_transfer_reversal`, `issuing_authorization_hold`, `issuing_authorization_release`, `issuing_dispute`, `issuing_transaction`, `obligation_outbound`, `obligation_reversal_inbound`, `payment`, `payment_failure_refund`, `payment_network_reserve_hold`, `payment_network_reserve_release`, `payment_refund`, `payment_reversal`, `payment_unreconciled`, `payout`, `payout_cancel`, `payout_failure`, `payout_minimum_balance_hold`, `payout_minimum_balance_release`, `refund`, `refund_failure`, `reserve_transaction`, `reserved_funds`, `reserve_hold`, `reserve_release`, `stripe_fee`, `stripe_fx_fee`, `stripe_balance_payment_debit`, `stripe_balance_payment_debit_reversal`, `tax_fee`, `topup`, `topup_reversal`, `transfer`, `transfer_cancel`, `transfer_failure`, `transfer_refund`, or `fee_credit_funding`."
+        }
+      },
+      "old_content_hash": "5bba7f80a8fe7ac97eb154bf0f7e0808b426994d92e19b45e95fcaa052993a69",
+      "new_content_hash": "fc0054fbd1cd3ee74b6f6c7a0b74b2426b882567ed86dbd4a7ea5dd26501f8fb"
+    },
+    {
+      "key": "GET:/v1/balance_transactions",
+      "change_type": "modified",
+      "field_changes": {
+        "markdown": {
+          "old": "### GET /v1/balance_transactions\n**Summary:** List all balance transactions\n**Description:** <p>Returns a list of transactions that have contributed to the Stripe account balance (for example, charges, transfers, and so on). The transactions return in sorted order, with the most recent transactions appearing first.</p>\n\n<p>The previous name of this endpoint was “Balance history,” and it used the path <code>/v1/balance/history</code>.</p>",
+          "new": "### GET /v1/balance_transactions\n**Summary:** List all balance transactions\n**Description:** <p>Returns a list of transactions that have contributed to the Stripe account balance (e.g., charges, transfers, and so forth). The transactions are returned in sorted order, with the most recent transactions appearing first.</p>\n\n<p>Note that this endpoint was previously called “Balance history” and used the path <code>/v1/balance/history</code>.</p>"
+        }
+      },
+      "old_content_hash": "d1cf55fe572e4c522dc6e7d53a22612bb4ddb469a3261d0c72eb59ee8097d975",
+      "new_content_hash": "5051327578d3c612226ca10987317da6089aa2cc81e5df82660312dbc91fb172"
+    }
+  ],
+  "strategy": "deterministe",
+  "confidence": "exact"
+}
