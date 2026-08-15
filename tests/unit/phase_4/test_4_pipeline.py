@@ -62,13 +62,19 @@ class _FakeAbstentionGate:
 
 
 class _FakeConflictDetector:
-    def __init__(self, reports=None):
+    def __init__(self, reports=None, structural_report=None):
         self.reports = reports or []
+        self.structural_report = structural_report or ConflictReport(conflict=False, method="version_diff")
         self.called = False
+        self.structural_called_with = None
 
     def detect_textual(self, chunks, config):
         self.called = True
         return self.reports
+
+    def detect_structural(self, source_id, version_from, version_to, key=None):
+        self.structural_called_with = (source_id, version_from, version_to, key)
+        return self.structural_report
 
 
 def _pipeline(
@@ -168,6 +174,94 @@ class TestQueryPipelineConflictGating:
         result = pipeline.answer("Q?")
         assert detector.called is True
         assert result.conflicts == [report]
+
+
+class TestQueryPipelineStructuralConflicts:
+    """detect_structural() existait déjà et était testé isolément, mais
+    n'avait jamais de point d'appel en production — seul detect_textual
+    (cross-source) était invoqué. Vérifie que la question comparative
+    déclenche maintenant aussi le conflit structurel déterministe, fusionné
+    avec les conflits textuels."""
+
+    _DIFF_REPORT = {
+        "source_id": "stripe",
+        "version_from": "legacy",
+        "version_to": "v2213",
+        "changes": [
+            {
+                "key": "GET:/v1/balance/history|param:type",
+                "change_type": "modified",
+                "field_changes": {"description": {"old": "a", "new": "b"}},
+                "old_content_hash": "a",
+                "new_content_hash": "b",
+            }
+        ],
+        "strategy": "deterministe",
+        "confidence": "exact",
+    }
+
+    def test_structural_conflict_called_and_merged_with_textual(self):
+        structural = ConflictReport(conflict=True, type="temporal", method="version_diff", confidence=1.0)
+        detector = _FakeConflictDetector(reports=[], structural_report=structural)
+        retriever = _FakeRetriever(extra={"diff_available": True, "diff_report": self._DIFF_REPORT})
+        pipeline = _pipeline(
+            sufficiency_verdict="sufficient",
+            sufficiency_confidence=0.9,
+            conflict_detector=detector,
+            conflict_sufficiency_threshold=0.7,
+            retriever=retriever,
+        )
+        result = pipeline.answer("Q?")
+        assert detector.structural_called_with == ("stripe", "legacy", "v2213", None)
+        assert result.conflicts == [structural]
+
+    def test_no_structural_conflict_reported_when_versions_actually_match(self):
+        no_conflict = ConflictReport(conflict=False, method="version_diff")
+        detector = _FakeConflictDetector(reports=[], structural_report=no_conflict)
+        retriever = _FakeRetriever(extra={"diff_available": True, "diff_report": self._DIFF_REPORT})
+        pipeline = _pipeline(
+            sufficiency_verdict="sufficient",
+            sufficiency_confidence=0.9,
+            conflict_detector=detector,
+            conflict_sufficiency_threshold=0.7,
+            retriever=retriever,
+        )
+        result = pipeline.answer("Q?")
+        assert result.conflicts == []
+
+    def test_no_diff_report_skips_structural_check(self):
+        """Question non-comparative (pas de diff_report) : pas d'appel
+        detect_structural, seulement detect_textual comme avant."""
+        detector = _FakeConflictDetector(reports=[])
+        pipeline = _pipeline(
+            sufficiency_verdict="sufficient",
+            sufficiency_confidence=0.9,
+            conflict_detector=detector,
+            conflict_sufficiency_threshold=0.7,
+        )
+        pipeline.answer("Q?")
+        assert detector.structural_called_with is None
+
+    def test_textual_and_structural_both_surface_together(self):
+        textual = ConflictReport(conflict=True, type="factual", method="llm_fallback")
+        structural = ConflictReport(conflict=True, type="temporal", method="version_diff", confidence=1.0)
+        detector = _FakeConflictDetector(reports=[textual], structural_report=structural)
+        retriever = _FakeRetriever(
+            results=[
+                {"chunk_id": str(uuid4()), "text": "t1", "payload": {"source_id": "a"}},
+                {"chunk_id": str(uuid4()), "text": "t2", "payload": {"source_id": "b"}},
+            ],
+            extra={"diff_available": True, "diff_report": self._DIFF_REPORT},
+        )
+        pipeline = _pipeline(
+            sufficiency_verdict="sufficient",
+            sufficiency_confidence=0.9,
+            conflict_detector=detector,
+            conflict_sufficiency_threshold=0.7,
+            retriever=retriever,
+        )
+        result = pipeline.answer("Q?")
+        assert result.conflicts == [textual, structural]
 
 
 class TestQueryPipelineDiffExplanation:
