@@ -5,7 +5,7 @@
 """Chunking hiérarchique avec Contextual Retrieval (déterministe + LLM)."""
 
 import hashlib
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import structlog
 
@@ -233,8 +233,13 @@ class HierarchicalChunker(ChunkingStrategy):
         for chunk in chunks:
             if not chunk.node_ids:
                 continue
-            node_id = chunk.node_ids[0]
-            node = tree.nodes.get(node_id)
+            # chunk.node_ids stocke des UUID sérialisés en str (voir
+            # node_ids=[str(node.id)] à la création du chunk) ; tree.nodes
+            # est indexé par UUID, pas par str — sans cette conversion,
+            # .get() ne trouve jamais rien et AUCUN chunk n'obtient de
+            # parent_chunk_id, silencieusement (bug réel trouvé en testant
+            # l'expansion parent explicite, audit #15).
+            node = tree.nodes.get(UUID(chunk.node_ids[0]))
             if node is None:
                 continue
             # Parent
