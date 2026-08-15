@@ -21,7 +21,7 @@ Règles strictes :
 3. Pour chaque affirmation factuelle importante de ta réponse, ajoute une citation dans `citations` :
    - `chunk_id` : copié EXACTEMENT depuis le marqueur [chunk_id] du chunk source dans le contexte (ne l'invente jamais, ne le modifie jamais).
    - `text_span` : le passage précis du chunk qui justifie l'affirmation.
-   - `support_level` : "fully_supported" si le passage affirme directement le fait, "partially_supported" s'il ne le suggère que partiellement. N'ajoute jamais de citation "no_support" — dans ce cas, ne cite simplement pas.
+   - `support_level` : "fully_supported" si le passage affirme directement le fait, "partially_supported" s'il ne le suggère que partiellement, "no_support" si tu cites ce passage mais qu'il ne soutient en réalité pas l'affirmation (préfère ne pas citer plutôt que d'inventer un passage à l'appui, mais si tu cites, déclare honnêtement le niveau de support réel).
 4. `confidence` et `sufficiency_score` sont des nombres décimaux entre 0.0 et 1.0 UNIQUEMENT (jamais une échelle de 0 à 10, jamais un pourcentage) :
    - `confidence` : ta confiance dans l'exactitude de la réponse compte tenu du contexte.
    - `sufficiency_score` : dans quelle mesure le contexte fourni contient assez d'information pour répondre complètement et exactement à la question (0.0 = pas du tout, 1.0 = totalement).
@@ -33,11 +33,12 @@ def build_user_message(
     question: str,
     chunks: list[dict],
     diff_explanation: str | None = None,
+    store=None,
 ) -> str:
     """Construit le message utilisateur : question d'abord, contexte ensuite."""
     parts = [f"Question : {question}"]
 
-    context = build_labelled_contexts(chunks)
+    context = build_labelled_contexts(chunks, store=store)
     if context:
         parts.append("\n---\nContexte documentaire :\n" + context)
     else:
