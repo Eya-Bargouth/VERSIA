@@ -69,7 +69,7 @@ class QueryPipeline:
         sufficiency = self.sufficiency_checker.check(question, chunks, self.llm_config)
         diff_explanation = self._diff_explanation(retrieval)
         generation = self.generator.generate(question, chunks, diff_explanation=diff_explanation)
-        conflicts = self._detect_conflicts(chunks, sufficiency)
+        conflicts = self._detect_conflicts(chunks, sufficiency, retrieval)
 
         reranker_scores = [c.get("rerank_score", c.get("score", 0.0)) for c in chunks]
         decision = self.abstention_gate.evaluate(
@@ -115,15 +115,31 @@ class QueryPipeline:
         return summarize_changes(changes, diff_report["version_from"], diff_report["version_to"])
 
     def _detect_conflicts(
-        self, chunks: list[dict], sufficiency: SufficiencyVerdict
+        self, chunks: list[dict], sufficiency: SufficiencyVerdict, retrieval: dict
     ) -> list[ConflictReport]:
+        """Fusionne conflits textuels (cross-source, LLM) et structurels
+        (déterministe, à partir du diff précalculé déjà chargé par
+        HybridRetriever pour les questions comparatives). detect_structural
+        existait déjà et était testé isolément, mais n'avait aucun point
+        d'appel en prod — seul detect_textual était invoqué ici."""
         if self.conflict_detector is None:
             return []
         if sufficiency.verdict == "insufficient":
             return []
         if sufficiency.confidence < self.conflict_sufficiency_threshold:
             return []
-        return self.conflict_detector.detect_textual(chunks, self.llm_config)
+
+        reports = list(self.conflict_detector.detect_textual(chunks, self.llm_config))
+
+        diff_report = retrieval.get("diff_report")
+        if diff_report:
+            structural = self.conflict_detector.detect_structural(
+                diff_report["source_id"], diff_report["version_from"], diff_report["version_to"]
+            )
+            if structural.conflict:
+                reports.append(structural)
+
+        return reports
 
     @staticmethod
     def _finalize_answer(decision, generation) -> tuple[str, list[Citation]]:
