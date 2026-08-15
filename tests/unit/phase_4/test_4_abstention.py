@@ -1,4 +1,5 @@
-"""Tests AbstentionGate — 3 zones, seuils provisoires, pénalité planner."""
+"""Tests AbstentionGate — 3 zones, seuils calibrés (voir docstring du module
+src/reliability/abstention.py pour la méthodologie), pénalité planner."""
 
 import pytest
 
@@ -76,3 +77,12 @@ class TestAbstentionGate:
     def test_invalid_threshold_order_raises(self):
         with pytest.raises(ValueError):
             AbstentionGate(threshold_low=0.8, threshold_high=0.2)
+
+    def test_default_threshold_low_is_calibrated_value(self):
+        """Régression : threshold_low=0.25, calibré sur données réelles
+        (data/eval/abstention_calibration_raw.jsonl, voir
+        scripts/calibrate_abstention_thresholds.py) — pas la valeur
+        provisoire 0.4 d'origine."""
+        gate = AbstentionGate()
+        assert gate.threshold_low == 0.25
+        assert gate.threshold_high == 0.7
