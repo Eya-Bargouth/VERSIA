@@ -206,6 +206,21 @@ class QdrantStore:
                 "Check qdrant-client version (expected >=1.9.0)."
             )
 
+    def get_by_chunk_id(self, chunk_id: str) -> dict | None:
+        """Récupère le payload d'un point par son `chunk_id` logique (champ
+        de payload), pas l'id de point Qdrant interne (dérivé de
+        content_hash — non prévisible depuis un `parent_chunk_id` stocké en
+        payload). Utilisé pour l'expansion parent explicite en retrieval
+        (context_fusion.build_labelled_contexts) quand le parent n'est pas
+        déjà présent dans le lot retrouvé. Retourne None si absent."""
+        points, _ = self.client.scroll(
+            collection_name=self.collection_name,
+            scroll_filter=Filter(must=[FieldCondition(key="chunk_id", match=MatchValue(value=chunk_id))]),
+            limit=1,
+            with_payload=True,
+        )
+        return points[0].payload if points else None
+
     @staticmethod
     def _build_filter(filter_dict: dict) -> Filter | None:
         """Construit un Filter Qdrant depuis un dict.
