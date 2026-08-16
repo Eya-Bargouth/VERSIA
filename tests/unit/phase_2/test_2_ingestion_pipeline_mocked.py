@@ -1,4 +1,12 @@
-"""Test d'intégration cumulatif Phase 1 + Phase 2."""
+"""Pipeline d'ingestion complet (builders -> chunking -> Qdrant), avec
+Qdrant en mémoire et un embedder factice (MockBGEEmbedder, np.random).
+
+Déplacé de tests/integration/ (audit N2) : ni Qdrant réel (déployé) ni
+BGE-M3 réel — un test dans tests/integration/ qui mock l'embedder n'est pas
+un vrai test d'intégration, peu importe son nom ou son dossier d'origine
+(voir CLAUDE.md). Le vrai pipeline bout-en-bout (Qdrant persistant +
+BGE-M3 réel) est couvert par tests/integration/test_real_pipeline_phase2.py
+et tests/integration/test_end_to_end_real.py."""
 
 import shutil
 
