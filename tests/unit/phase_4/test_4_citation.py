@@ -80,3 +80,53 @@ class TestEnrichCitations:
 
     def test_empty_input_returns_empty_list(self):
         assert enrich_citations([], []) == []
+
+
+class TestGroundingFallback:
+    """text_span fabriqué/haluciné (absent du texte réel du chunk) : filet
+    de sécurité, retombe sur le chunk entier plutôt que de laisser passer
+    une citation invérifiable (audit Citation Accuracy, spec §15.3)."""
+
+    def test_span_absent_from_chunk_falls_back_to_full_text(self):
+        chunk_id = uuid4()
+        chunks = [{"chunk_id": str(chunk_id), "text": "Le paramètre symbol est requis.", "payload": {}}]
+        raw = [RawCitation(chunk_id=chunk_id, text_span="ceci n'apparaît nulle part dans le chunk", support_level="fully_supported")]
+
+        result = enrich_citations(raw, chunks)
+
+        assert result[0].text_span == "Le paramètre symbol est requis."
+
+    def test_span_present_verbatim_is_kept_as_is(self):
+        chunk_id = uuid4()
+        chunk_text = "Le paramètre symbol est requis pour cet endpoint."
+        chunks = [{"chunk_id": str(chunk_id), "text": chunk_text, "payload": {}}]
+        raw = [RawCitation(chunk_id=chunk_id, text_span="symbol est requis", support_level="fully_supported")]
+
+        result = enrich_citations(raw, chunks)
+
+        assert result[0].text_span == "symbol est requis"
+
+    def test_span_present_with_different_whitespace_is_kept_as_is(self):
+        """Tolère les différences d'indentation/retours à la ligne (le LLM
+        reproduit rarement le JSON source caractère pour caractère) sans
+        déclencher le repli à tort."""
+        chunk_id = uuid4()
+        chunk_text = '"parameters": [\n    {\n      "name": "symbol",\n      "required": true\n    }\n  ]'
+        chunks = [{"chunk_id": str(chunk_id), "text": chunk_text, "payload": {}}]
+        raw = [RawCitation(chunk_id=chunk_id, text_span='"name": "symbol", "required": true', support_level="fully_supported")]
+
+        result = enrich_citations(raw, chunks)
+
+        assert result[0].text_span == '"name": "symbol", "required": true'
+
+    def test_missing_chunk_text_skips_grounding_check(self):
+        """Chunk sans champ 'text' (fixture minimale/legacy) : pas de texte
+        de référence disponible, on garde le text_span du LLM tel quel
+        plutôt que de le vider silencieusement."""
+        chunk_id = uuid4()
+        chunks = [{"chunk_id": str(chunk_id), "payload": {}}]
+        raw = [RawCitation(chunk_id=chunk_id, text_span="symbol is required", support_level="fully_supported")]
+
+        result = enrich_citations(raw, chunks)
+
+        assert result[0].text_span == "symbol is required"
