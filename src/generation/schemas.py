@@ -36,7 +36,13 @@ class RawGenerationOutput(BaseModel):
     """Schéma exact demandé au LLM via ``LLMConfig.response_format``."""
 
     answer: str
-    citations: list[RawCitation] = Field(default_factory=list)
+    # max_length borne la sortie contrainte JSON (Ollama/vLLM respectent
+    # maxItems du schéma) — garde-fou structurel contre une boucle de
+    # répétition dégénérée du modèle (le même objet citation réémis en
+    # boucle jusqu'à troncature par max_tokens, observé en conditions
+    # réelles avec qwen2.5:3b-instruct) : borne le dégât quelle que soit la
+    # cause, complémentaire à repeat_penalty qui s'attaque à la cause elle-même.
+    citations: list[RawCitation] = Field(default_factory=list, max_length=15)
     confidence: float = Field(ge=0.0, le=1.0)
     sufficiency_score: float = Field(ge=0.0, le=1.0)
 
