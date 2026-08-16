@@ -227,7 +227,18 @@ def _resolve_files(source: SourceConfig) -> list[Path]:
     séparément par discover_sources)."""
     if source.source_dir is None or not source.source_dir.exists():
         return []
-    return sorted(p for p in source.source_dir.iterdir() if p.is_file() and select_builder(str(p)) is not None)
+    files = []
+    for path in sorted(source.source_dir.iterdir()):
+        if not path.is_file():
+            continue
+        if select_builder(str(path)) is not None:
+            files.append(path)
+        else:
+            # Fichier présent dans le dossier source mais d'un format non
+            # supporté par aucun builder — auparavant ignoré silencieusement,
+            # rendant une perte de contenu difficile à diagnostiquer.
+            logger.info("file_skipped_unsupported_format", source_id=source.source_id, file=str(path))
+    return files
 
 
 def select_builder(file_path: str) -> AbstractDOMBuilder | None:
