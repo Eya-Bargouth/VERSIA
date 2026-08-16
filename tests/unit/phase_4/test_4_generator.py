@@ -94,6 +94,26 @@ class TestGenerator:
         assert result.sufficiency_score == 0.0
         assert result.citations == []
 
+    def test_too_many_citations_falls_back_safely(self, sample_chunk):
+        """Régression : boucle de répétition dégénérée observée en conditions
+        réelles (qwen2.5:3b-instruct réémettant le même objet citation en
+        boucle) — RawGenerationOutput.citations plafonné à 15 (spec schema
+        max_length) ; si le JSON en dépasse quand même, dégradation propre
+        plutôt qu'un crash non géré."""
+        chunk_id, chunk = sample_chunk
+        one_citation = f'{{"chunk_id": "{chunk_id}", "text_span": "x", "support_level": "fully_supported"}}'
+        content = (
+            '{"answer": "a", "citations": [' + ", ".join([one_citation] * 20) + '], '
+            '"confidence": 0.9, "sufficiency_score": 0.9}'
+        )
+        client = _FakeLLMClient(content)
+        gen = Generator(client, LLMConfig(provider="ollama", model="qwen2.5:3b-instruct"))
+
+        result = gen.generate("Q", [chunk])
+
+        assert result.confidence == 0.0
+        assert result.citations == []
+
     def test_question_precedes_context_in_sent_message(self, sample_chunk):
         chunk_id, chunk = sample_chunk
         client = _FakeLLMClient(
