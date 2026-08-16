@@ -54,6 +54,40 @@ class TestOllamaResponseFormat:
         assert "format" not in captured["payload"]
 
 
+class TestOllamaRepeatPenalty:
+    """Contre les boucles de répétition dégénérées observées en conditions
+    réelles (qwen2.5:3b-instruct réémettant le même objet citation en boucle
+    à basse température) — voir Settings.llm_repeat_penalty."""
+
+    def test_repeat_penalty_set_in_options_when_configured(self, monkeypatch):
+        captured = {}
+
+        def fake_post(url, json=None, timeout=None):
+            captured["payload"] = json
+            return _FakeResponse({"message": {"content": "ok"}, "done_reason": "stop"})
+
+        monkeypatch.setattr(httpx, "post", fake_post)
+
+        config = LLMConfig(provider="ollama", model="qwen2.5:3b-instruct", repeat_penalty=1.3)
+        OllamaClient().complete([LLMMessage(role="user", content="hi")], config)
+
+        assert captured["payload"]["options"]["repeat_penalty"] == 1.3
+
+    def test_repeat_penalty_omitted_when_not_configured(self, monkeypatch):
+        captured = {}
+
+        def fake_post(url, json=None, timeout=None):
+            captured["payload"] = json
+            return _FakeResponse({"message": {"content": "ok"}, "done_reason": "stop"})
+
+        monkeypatch.setattr(httpx, "post", fake_post)
+
+        config = LLMConfig(provider="ollama", model="qwen2.5:3b-instruct")
+        OllamaClient().complete([LLMMessage(role="user", content="hi")], config)
+
+        assert "repeat_penalty" not in captured["payload"]["options"]
+
+
 class TestVLLMResponseFormat:
     def test_response_format_sets_openai_json_schema(self, monkeypatch):
         captured = {}
