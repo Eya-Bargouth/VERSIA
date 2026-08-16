@@ -30,8 +30,19 @@ class Settings(BaseSettings):
     llm_model: str = "qwen2.5:3b-instruct"
     llm_base_url: str = "http://localhost:11434"
     llm_temperature: float = 0.1
-    llm_max_tokens: int = 2048
+    # 4096 (pas 2048) : une réponse décrivant plusieurs changements sur
+    # plusieurs endpoints (questions de conflit de version) dépasse
+    # régulièrement 2048 tokens et coupe le JSON en plein milieu d'une
+    # chaîne — trouvé en conditions réelles (généré non-parseable), pas
+    # une valeur augmentée par prudence a priori.
+    llm_max_tokens: int = 4096
     llm_timeout: int = 120
+    # Pénalise la réémission de tokens déjà produits — contre les boucles de
+    # répétition dégénérées observées en sortie contrainte JSON à basse
+    # température sur les petits modèles (ex. qwen2.5:3b-instruct générant
+    # le même objet "citation" en boucle jusqu'à troncature par max_tokens).
+    # None laisse Ollama/vLLM utiliser leur propre valeur par défaut.
+    llm_repeat_penalty: float | None = 1.3
     llm_fallback_provider: str | None = None
     llm_fallback_model: str | None = None
 
