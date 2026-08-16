@@ -66,8 +66,8 @@ class QueryPipeline:
         retrieval = self.retriever.retrieve(question, top_k=top_k)
         chunks = retrieval["results"]
 
-        sufficiency = self.sufficiency_checker.check(question, chunks, self.llm_config)
         diff_explanation = self._diff_explanation(retrieval)
+        sufficiency = self.sufficiency_checker.check(question, chunks, self.llm_config, diff_explanation=diff_explanation)
         generation = self.generator.generate(question, chunks, diff_explanation=diff_explanation)
         conflicts = self._detect_conflicts(chunks, sufficiency, retrieval)
 
