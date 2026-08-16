@@ -25,6 +25,13 @@ def enrich_citations(raw_citations: list[RawCitation], chunks: list[dict]) -> li
     absents de `chunks`) sont abandonnés plutôt que de fabriquer des
     métadonnées — une citation non vérifiable ne vaut pas mieux qu'aucune
     citation.
+
+    `text_span` non ancré dans le texte réel du chunk (fabriqué/halluciné
+    par le LLM plutôt que copié) : filet de sécurité, retombe sur le texte
+    complet du chunk plutôt que de laisser passer silencieusement une
+    citation invérifiable — ne corrige pas un text_span mal choisi mais
+    ancré (ex. un passage réel mais non pertinent, voir Citation Accuracy
+    spec §15.3), seulement une citation entièrement inventée.
     """
     chunk_by_id = {str(c.get("chunk_id")): c for c in chunks}
     citations: list[Citation] = []
@@ -36,6 +43,12 @@ def enrich_citations(raw_citations: list[RawCitation], chunks: list[dict]) -> li
             continue
 
         payload = chunk.get("payload", {})
+        chunk_text = chunk.get("text", "")
+        text_span = raw.text_span
+        if chunk_text and text_span and _normalize_whitespace(text_span) not in _normalize_whitespace(chunk_text):
+            logger.warning("citation_span_not_grounded_falling_back_to_chunk", chunk_id=str(raw.chunk_id))
+            text_span = chunk_text
+
         citations.append(
             Citation(
                 citation_id=f"cit_{len(citations) + 1:03d}",
@@ -44,9 +57,16 @@ def enrich_citations(raw_citations: list[RawCitation], chunks: list[dict]) -> li
                 section=payload.get("hierarchy_path") or payload.get("section_title"),
                 page=payload.get("page_num"),
                 line=payload.get("line_num"),
-                text_span=raw.text_span,
+                text_span=text_span,
                 support_level=raw.support_level,
             )
         )
 
     return citations
+
+
+def _normalize_whitespace(text: str) -> str:
+    """Tolère les différences d'indentation/retours à la ligne entre le
+    text_span reproduit par le LLM et le texte source, sans tolérer un
+    contenu réellement différent."""
+    return " ".join(text.split())
