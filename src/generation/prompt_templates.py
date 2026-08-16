@@ -20,7 +20,7 @@ Règles strictes :
 2. Réponds dans la même langue que la question.
 3. Pour chaque affirmation factuelle importante de ta réponse, ajoute une citation dans `citations` :
    - `chunk_id` : copié EXACTEMENT depuis le marqueur [chunk_id] du chunk source dans le contexte (ne l'invente jamais, ne le modifie jamais).
-   - `text_span` : le passage précis du chunk qui justifie l'affirmation.
+   - `text_span` : le fragment MINIMAL du chunk qui affirme DIRECTEMENT le fait cité — jamais un passage voisin, une liste de valeurs associées (ex. une énumération de types/intervalles) ou une description générale du champ. S'il faut citer un nom de paramètre ET dire qu'il est requis, le fragment doit contenir les deux, pas juste l'un ou l'autre.
    - `support_level` : "fully_supported" si le passage affirme directement le fait, "partially_supported" s'il ne le suggère que partiellement, "no_support" si tu cites ce passage mais qu'il ne soutient en réalité pas l'affirmation (préfère ne pas citer plutôt que d'inventer un passage à l'appui, mais si tu cites, déclare honnêtement le niveau de support réel).
 4. `confidence` et `sufficiency_score` sont des nombres décimaux entre 0.0 et 1.0 UNIQUEMENT (jamais une échelle de 0 à 10, jamais un pourcentage) :
    - `confidence` : ta confiance dans l'exactitude de la réponse compte tenu du contexte.
