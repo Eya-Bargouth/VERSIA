@@ -43,6 +43,7 @@ raw/
 !tests/fixtures/
 data/cache/
 
+docs/
 
 # Logs
 *.log
