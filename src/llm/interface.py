@@ -53,6 +53,10 @@ class LLMConfig(BaseModel):
     # d'éviter toute contention VRAM avec le pipeline évalué. None laisse
     # Ollama décider (comportement par défaut, inchangé).
     num_gpu: int | None = None
+    # Pénalise la réémission de tokens déjà produits — voir
+    # Settings.llm_repeat_penalty. None laisse le provider utiliser sa
+    # propre valeur par défaut.
+    repeat_penalty: float | None = None
 
 
 class BaseLLMClient(ABC):
