@@ -76,3 +76,56 @@ class TestSufficiencyCheckerEntityMatching:
             [{"text": "Subscriptions can be cancelled at any time", "payload": {}}],
         )
         assert verdict.verdict == "partial"
+
+
+class TestSufficiencyCheckerDiffExplanation:
+    """Angle mort corrigé : sans diff_explanation, une question de conflit
+    de version ("qu'est-ce qui a changé entre X et Y") est jugée
+    insufficient car les chunks bruts (une seule version) ne peuvent
+    effectivement pas y répondre seuls — même si le diff précalculé, lui,
+    le peut. Le diff doit maintenant être factorisé dans le jugement."""
+
+    def test_entity_matching_becomes_sufficient_when_diff_covers_the_gap(self):
+        checker = SufficiencyChecker()
+        question = "Qu'est-ce qui a changé pour le paramètre refundamount entre les versions ?"
+        context = [{"text": "Endpoint description sans rapport", "payload": {}}]
+
+        without_diff = checker.check(question, context)
+        with_diff = checker.check(
+            question, context,
+            diff_explanation="Changements entre legacy et v2213:\n- refundamount: modifié (description mise à jour)",
+        )
+
+        assert without_diff.verdict == "insufficient"
+        assert with_diff.verdict in ("sufficient", "partial")
+
+    def test_llm_path_includes_diff_in_judged_context(self):
+        captured = {}
+
+        class _CapturingLLM(BaseLLMClient):
+            def complete(self, messages, config):
+                captured["user_content"] = messages[-1].content
+                return LLMResponse(content='{"verdict": "sufficient", "confidence": 0.9}', usage=LLMUsage(), model=config.model)
+
+            async def complete_stream(self, messages, config):
+                yield ""
+
+            def validate_config(self, config):
+                return True
+
+        checker = SufficiencyChecker(llm_client=_CapturingLLM())
+        checker.check(
+            "Q?", [{"text": "context"}], LLMConfig(provider="ollama", model="x"),
+            diff_explanation="Changements entre legacy et v2213:\n- foo: modifié",
+        )
+        assert "Changements entre legacy et v2213" in captured["user_content"]
+
+    def test_no_diff_explanation_behaves_exactly_as_before(self):
+        """Rétrocompatibilité stricte : diff_explanation=None (défaut) ne
+        change rien au comportement existant."""
+        checker = SufficiencyChecker()
+        verdict = checker.check(
+            "What parameter is required for orders?",
+            [{"text": "The required parameter for orders is symbol", "payload": {}}],
+        )
+        assert verdict.verdict == "sufficient"
