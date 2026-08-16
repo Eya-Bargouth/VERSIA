@@ -4,7 +4,8 @@ de manifestes, Phase 5 — plus de manifeste à écrire)."""
 import pytest
 from pathlib import Path
 
-from src.ingestion.pipeline import discover_sources
+from src.config.source_config import SourceConfig
+from src.ingestion.pipeline import _resolve_files, discover_sources
 
 pytestmark = pytest.mark.phase2
 
@@ -85,3 +86,27 @@ class TestSourceDiscovery:
         stripe = next(s for s in sources if s.source_id == "stripe")
         assert stripe.version_pattern is not None
         assert stripe.version_order == ["legacy", "v2213", "v2293", "v2323"]
+
+    def test_unsupported_files_excluded_and_logged(self, tmp_path, monkeypatch):
+        """Un fichier de format non supporté (aucun builder ne le prend en
+        charge) dans un dossier source est ignoré silencieusement avant ce
+        correctif — journalisé maintenant (audit N5), pour ne pas perdre de
+        contenu sans diagnostic possible."""
+        source_dir = tmp_path / "mixed"
+        source_dir.mkdir()
+        (source_dir / "spec.yaml").write_text("a: 1\n", encoding="utf-8")
+        (source_dir / "notes.txt").write_text("unsupported", encoding="utf-8")
+
+        logged = []
+        import src.ingestion.pipeline as pipeline_module
+
+        monkeypatch.setattr(pipeline_module.logger, "info", lambda event, **kw: logged.append((event, kw)))
+
+        config = SourceConfig(source_id="mixed", source_dir=source_dir)
+        files = _resolve_files(config)
+
+        assert [f.name for f in files] == ["spec.yaml"]
+        skip_events = [kw for event, kw in logged if event == "file_skipped_unsupported_format"]
+        assert len(skip_events) == 1
+        assert skip_events[0]["source_id"] == "mixed"
+        assert "notes.txt" in skip_events[0]["file"]
