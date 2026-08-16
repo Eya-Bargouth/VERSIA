@@ -53,19 +53,35 @@ class SufficiencyChecker:
         question: str,
         context: list[dict],
         config: LLMConfig | None = None,
+        diff_explanation: str | None = None,
     ) -> SufficiencyVerdict:
+        """
+        Args:
+            diff_explanation: Résumé texte d'un diff précalculé entre deux
+                versions (même texte que celui injecté dans le prompt du
+                générateur pour les questions comparatives, voir
+                QueryPipeline._diff_explanation). Quand disponible, factorisé
+                dans le jugement de suffisance : les chunks bruts seuls ne
+                permettent jamais de répondre à "qu'est-ce qui a changé entre
+                les versions X et Y", même quand le système dispose bien de
+                l'information via ce diff — sans ce paramètre, le checker
+                déclarait ces questions "insufficient" à tort (angle mort
+                mesuré via Sufficiency Precision, spec §15.3).
+        """
         if self.llm_client is not None and config is not None:
             try:
-                return self._check_llm(question, context, config)
+                return self._check_llm(question, context, config, diff_explanation)
             except Exception as exc:
                 logger.warning("sufficiency_llm_check_failed", error=str(exc))
 
-        return self._check_entity_matching(question, context)
+        return self._check_entity_matching(question, context, diff_explanation)
 
     def _check_llm(
-        self, question: str, context: list[dict], config: LLMConfig
+        self, question: str, context: list[dict], config: LLMConfig, diff_explanation: str | None = None
     ) -> SufficiencyVerdict:
         context_text = "\n---\n".join(c.get("text", "") for c in context) or "(aucun contexte)"
+        if diff_explanation:
+            context_text += f"\n---\nDifférences détectées entre versions :\n{diff_explanation}"
         messages = [
             LLMMessage(role="system", content=_SUFFICIENCY_SYSTEM_PROMPT),
             LLMMessage(
@@ -83,9 +99,12 @@ class SufficiencyChecker:
         )
 
     @staticmethod
-    def _check_entity_matching(question: str, context: list[dict]) -> SufficiencyVerdict:
+    def _check_entity_matching(
+        question: str, context: list[dict], diff_explanation: str | None = None
+    ) -> SufficiencyVerdict:
         """Repli déterministe (spec §8) : les mots significatifs de la
-        question doivent apparaître dans hierarchy_path ou text des chunks."""
+        question doivent apparaître dans hierarchy_path ou text des chunks
+        (ou dans le résumé de diff, quand disponible)."""
         question_terms = {
             w for w in re.findall(r"\w+", question.lower()) if len(w) >= 3 and w not in _STOPWORDS
         }
@@ -95,6 +114,8 @@ class SufficiencyChecker:
         haystack = " ".join(
             f"{c.get('text', '')} {c.get('payload', {}).get('hierarchy_path', '')}" for c in context
         ).lower()
+        if diff_explanation:
+            haystack += f" {diff_explanation}".lower()
 
         matched = sum(1 for term in question_terms if term in haystack)
         ratio = matched / len(question_terms)
