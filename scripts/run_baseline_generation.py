@@ -31,6 +31,14 @@ from pathlib import Path
 _PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
 
+# La console Windows utilise par défaut l'encodage OEM (cp1252/850, pas
+# UTF-8) — print() plante sur certains caractères Unicode légitimes du
+# corpus/des réponses générées (guillemets typographiques, tirets cadratins,
+# etc.), faisant perdre une question entière en fin de traitement (trouvé
+# en conditions réelles, pas une précaution ajoutée à l'aveugle).
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 from qdrant_client import QdrantClient
 
 from src.config.settings import get_settings
@@ -80,6 +88,7 @@ def build_components():
         temperature=settings.llm_temperature,
         max_tokens=settings.llm_max_tokens,
         timeout=settings.llm_timeout,
+        repeat_penalty=settings.llm_repeat_penalty,
     )
     judge_config = LLMConfig(
         provider="ollama",
@@ -88,6 +97,7 @@ def build_components():
         temperature=0.1,
         max_tokens=300,
         num_gpu=0,  # juge indépendant, CPU — évite la contention VRAM et le biais d'auto-évaluation
+        repeat_penalty=settings.llm_repeat_penalty,
     )
     gen_client = LLMFactory.create(gen_config)
     judge_client = LLMFactory.create(judge_config)
@@ -117,13 +127,26 @@ def run_one_question(components: dict, q: dict) -> dict:
     retrieval = retriever.retrieve(query=q["question"], top_k=10)
     chunks = retrieval["results"]
 
-    sufficiency = components["sufficiency_checker"].check(q["question"], chunks, gen_config)
     diff_explanation = QueryPipeline._diff_explanation(retrieval)
+    sufficiency = components["sufficiency_checker"].check(q["question"], chunks, gen_config, diff_explanation=diff_explanation)
     generation = components["generator"].generate(q["question"], chunks, diff_explanation=diff_explanation)
 
     conflicts = []
     if sufficiency.verdict != "insufficient" and sufficiency.confidence >= CONFLICT_SUFFICIENCY_THRESHOLD:
-        conflicts = components["conflict_detector"].detect_textual(chunks, gen_config)
+        conflicts = list(components["conflict_detector"].detect_textual(chunks, gen_config))
+        # Ce script réimplémente sa propre chaîne retrieve->sufficiency->
+        # generate->conflict (pour capturer séparément la génération brute et
+        # finale depuis un seul passage, voir docstring du module) plutôt que
+        # de réutiliser QueryPipeline._detect_conflicts() — doit donc recevoir
+        # le même fix (audit #12) séparément, sinon les conflits structurels
+        # restent invisibles ici même une fois QueryPipeline corrigé.
+        diff_report = retrieval.get("diff_report")
+        if diff_report:
+            structural = components["conflict_detector"].detect_structural(
+                diff_report["source_id"], diff_report["version_from"], diff_report["version_to"]
+            )
+            if structural.conflict:
+                conflicts.append(structural)
 
     reranker_scores = [c.get("rerank_score", c.get("score", 0.0)) for c in chunks]
     decision = components["abstention_gate"].evaluate(
@@ -192,12 +215,14 @@ def run_one_question_with_retry(components: dict, q: dict) -> dict:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=None, help="Nombre de questions à traiter (smoke test)")
+    parser.add_argument("--questions-path", type=Path, default=None, help="Fichier de questions alternatif (JSONL)")
     args = parser.parse_args()
 
-    questions = [json.loads(line) for line in QUESTIONS_PATH.read_text(encoding="utf-8").splitlines() if line.strip()]
+    questions_path = args.questions_path or QUESTIONS_PATH
+    questions = [json.loads(line) for line in questions_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     if args.limit:
         questions = questions[: args.limit]
-    print(f"Traitement de {len(questions)} questions...")
+    print(f"Traitement de {len(questions)} questions (source: {questions_path.name})...")
 
     components = build_components()
 
