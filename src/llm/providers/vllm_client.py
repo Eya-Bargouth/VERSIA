@@ -26,6 +26,9 @@ class VLLMClient(BaseLLMClient):
             "temperature": config.temperature,
             "max_tokens": config.max_tokens,
         }
+        if config.repeat_penalty is not None:
+            # Extension vLLM (non standard OpenAI) — voir Settings.llm_repeat_penalty.
+            payload["repetition_penalty"] = config.repeat_penalty
         if config.response_format is not None:
             # Format OpenAI-compatible (structured outputs) — nécessite un
             # backend vLLM avec guided decoding activé (outlines/xgrammar).
