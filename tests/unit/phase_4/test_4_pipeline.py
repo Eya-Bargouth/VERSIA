@@ -36,8 +36,9 @@ class _FakeSufficiencyChecker:
         self.verdict = verdict
         self.called_with = None
 
-    def check(self, question, context, config):
+    def check(self, question, context, config, diff_explanation=None):
         self.called_with = (question, context, config)
+        self.diff_explanation_received = diff_explanation
         return self.verdict
 
 
@@ -295,3 +296,34 @@ class TestQueryPipelineDiffExplanation:
         pipeline = _pipeline()
         pipeline.answer("Q?")
         assert pipeline.generator.called_with["diff_explanation"] is None
+
+    def test_diff_explanation_also_passed_to_sufficiency_checker(self):
+        """Angle mort corrigé : SufficiencyChecker jugeait "insufficient"
+        les questions de conflit de version car il ne recevait jamais le
+        diff précalculé, alors que le générateur (lui) l'utilise déjà pour
+        répondre correctement — même texte maintenant transmis aux deux."""
+        diff_report = {
+            "source_id": "stripe",
+            "version_from": "legacy",
+            "version_to": "v2323",
+            "changes": [
+                {
+                    "key": "POST:/v1/orders",
+                    "change_type": "modified",
+                    "field_changes": {"required": {"old": False, "new": True}},
+                    "old_content_hash": "a",
+                    "new_content_hash": "b",
+                }
+            ],
+            "strategy": "deterministe",
+            "confidence": "exact",
+        }
+        retriever = _FakeRetriever(extra={"diff_available": True, "diff_report": diff_report})
+        pipeline = _pipeline(retriever=retriever)
+
+        pipeline.answer("Q?")
+
+        suff_diff = pipeline.sufficiency_checker.diff_explanation_received
+        gen_diff = pipeline.generator.called_with["diff_explanation"]
+        assert suff_diff is not None
+        assert suff_diff == gen_diff
