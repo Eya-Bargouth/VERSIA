@@ -35,6 +35,8 @@ class OllamaClient(BaseLLMClient):
         }
         if config.num_gpu is not None:
             payload["options"]["num_gpu"] = config.num_gpu
+        if config.repeat_penalty is not None:
+            payload["options"]["repeat_penalty"] = config.repeat_penalty
         if config.response_format is not None:
             # Ollama structured outputs: `format` prend directement le JSON
             # schema (contrairement à l'API OpenAI-compatible de vLLM, qui
@@ -79,6 +81,8 @@ class OllamaClient(BaseLLMClient):
         }
         if config.num_gpu is not None:
             payload["options"]["num_gpu"] = config.num_gpu
+        if config.repeat_penalty is not None:
+            payload["options"]["repeat_penalty"] = config.repeat_penalty
 
         async with httpx.AsyncClient() as client:
             async with client.stream("POST", url, json=payload, timeout=config.timeout) as response:
