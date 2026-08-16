@@ -1,4 +1,9 @@
-"""Test d'integration Phase 1 — chaine complete settings -> builders -> LLM mock."""
+"""Câblage builders -> LLM (settings, DOM builders, LLMFactory).
+
+Déplacé de tests/integration/ (audit N2) : le LLM est entièrement mocké
+(mock_llm_client -> MockLLMClient, jamais Ollama/vLLM réel) — un test dans
+tests/integration/ qui mock le LLM n'est pas un vrai test d'intégration,
+peu importe son nom ou son dossier d'origine (voir CLAUDE.md)."""
 
 import pytest
 
@@ -9,6 +14,8 @@ from src.dom.builders.yaml_builder import YAMLBuilder
 from src.dom.models import NodeType
 from src.llm.interface import LLMConfig, LLMMessage
 from src.llm.factory import LLMFactory
+from src.llm.providers import ollama_client  # noqa: F401 — self-registers
+from src.llm.providers import vllm_client  # noqa: F401 — self-registers
 
 pytestmark = pytest.mark.phase1
 
