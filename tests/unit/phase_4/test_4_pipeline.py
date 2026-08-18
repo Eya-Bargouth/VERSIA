@@ -20,8 +20,8 @@ class _FakeRetriever:
         self.extra = extra or {}
         self.last_call = None
 
-    def retrieve(self, question, top_k=10):
-        self.last_call = {"question": question, "top_k": top_k}
+    def retrieve(self, question, top_k=10, k_dense=None, k_sparse=None):
+        self.last_call = {"question": question, "top_k": top_k, "k_dense": k_dense, "k_sparse": k_sparse}
         return {
             "results": self.results,
             "planner_intent": "factual",
@@ -96,6 +96,7 @@ def _pipeline(
                 document="doc.yaml",
                 text_span="span",
                 support_level="fully_supported",
+                claim="the claim",
             )
         ],
         confidence=0.9,
