@@ -59,6 +59,7 @@ def enrich_citations(raw_citations: list[RawCitation], chunks: list[dict]) -> li
                 line=payload.get("line_num"),
                 text_span=text_span,
                 support_level=raw.support_level,
+                claim=raw.claim,
             )
         )
 
