@@ -15,6 +15,7 @@ from typing import Literal
 import structlog
 from pydantic import BaseModel, Field
 
+from src.config.settings import get_settings
 from src.generation.generator import Generator
 from src.generation.schemas import Citation
 from src.ingestion.version_diff import Change
@@ -63,7 +64,10 @@ class QueryPipeline:
         self.conflict_sufficiency_threshold = conflict_sufficiency_threshold
 
     def answer(self, question: str, top_k: int = 10) -> PipelineResult:
-        retrieval = self.retriever.retrieve(question, top_k=top_k)
+        settings = get_settings()
+        retrieval = self.retriever.retrieve(
+            question, top_k=top_k, k_dense=settings.retrieval_k_dense, k_sparse=settings.retrieval_k_sparse
+        )
         chunks = retrieval["results"]
 
         diff_explanation = self._diff_explanation(retrieval)

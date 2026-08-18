@@ -58,6 +58,15 @@ class Settings(BaseSettings):
     # Reranker
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
 
+    # Retrieval — nombre de candidats remontés de Qdrant par branche
+    # (dense/sparse) avant fusion RRF + reranking. Valeur unique, centralisée
+    # ici : avant ce fix, 4 valeurs différentes coexistaient (10 par défaut
+    # jamais questionné dans HybridRetriever.retrieve/QueryPipeline, 16/20/50
+    # hardcodés séparément dans différents scripts d'évaluation), aucune
+    # comparée rigoureusement à une autre.
+    retrieval_k_dense: int = 15
+    retrieval_k_sparse: int = 15
+
     # Chunking
     chunk_contextual_prefix_max_tokens: int = 100
 
