@@ -28,7 +28,9 @@ from src.evaluation.retrieval_metrics import aggregate, evaluate_query
 from src.retrieval.hybrid_retriever import HybridRetriever
 
 K_VALUES = [5, 10]
-TOP_K_RETRIEVE = 10
+_settings = get_settings()
+TOP_K_RETRIEVE = _settings.retrieval_k_dense
+K_DENSE_SPARSE = _settings.retrieval_k_dense
 
 FINAL_QUESTIONS = _PROJECT_ROOT / "data" / "eval" / "questions_v1.jsonl"
 DRAFT_QUESTIONS = _PROJECT_ROOT / "data" / "eval" / "questions_v1_draft.jsonl"
@@ -97,12 +99,12 @@ def main():
 
     # Baseline B — hybride dense+sparse+RRF, pas de reranker.
     def run_b(query: str):
-        out = retriever_no_rerank.retrieve(query=query, top_k=TOP_K_RETRIEVE, k_dense=20, k_sparse=20)
+        out = retriever_no_rerank.retrieve(query=query, top_k=TOP_K_RETRIEVE, k_dense=K_DENSE_SPARSE, k_sparse=K_DENSE_SPARSE)
         return to_result_list(out)
 
     # Baseline C — hybride + reranker.
     def run_c(query: str):
-        out = retriever_with_rerank.retrieve(query=query, top_k=TOP_K_RETRIEVE, k_dense=20, k_sparse=20)
+        out = retriever_with_rerank.retrieve(query=query, top_k=TOP_K_RETRIEVE, k_dense=K_DENSE_SPARSE, k_sparse=K_DENSE_SPARSE)
         return to_result_list(out)
 
     results = {
