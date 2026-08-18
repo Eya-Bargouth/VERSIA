@@ -190,21 +190,26 @@ def benchmark_strategy(
         # nothing meaningful about actual retrieval quality).
         query_embedding, query_sparse = embedder.embed_query(query)
 
-        # Execute retrieval
+        # Execute retrieval — la profondeur de candidats par branche
+        # (k_dense/k_sparse) vient de settings (source unique, cf.
+        # retrieval_k_dense/k_sparse) ; top_k reste dimensionné sur
+        # max(k_values) pour que Recall@k reste mesurable à la plus grande
+        # coupure demandée, indépendamment de cette valeur.
+        settings = get_settings()
         try:
             if "dense_only" in strategy_name.lower():
-                results = retriever.dense_search.search_dense(query_embedding, k=50)
+                results = retriever.dense_search.search_dense(query_embedding, k=max(k_values))
             elif "sparse_only" in strategy_name.lower():
-                results = retriever.sparse_search.search_sparse(query_sparse, k=50)
+                results = retriever.sparse_search.search_sparse(query_sparse, k=max(k_values))
             else:
                 # Hybrid
                 ret = retriever.retrieve(
                     query=query,
                     query_embedding=query_embedding,
                     query_sparse=query_sparse,
-                    top_k=50,
-                    k_dense=50,
-                    k_sparse=50
+                    top_k=max(k_values),
+                    k_dense=settings.retrieval_k_dense,
+                    k_sparse=settings.retrieval_k_sparse,
                 )
                 results = [
                     type('obj', (), {
