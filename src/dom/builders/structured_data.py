@@ -34,6 +34,7 @@ code spécifique à OpenAPI : un endpoint est un dict mixte comme un autre.
 """
 
 import json
+import re
 from abc import abstractmethod
 from typing import Any
 
@@ -53,19 +54,32 @@ logger = structlog.get_logger(__name__)
 _LEAF_SIZE_THRESHOLD = 2000
 
 # Profondeur max de résolution $ref en chaîne (ref -> cible contenant elle-
-# même un ref -> ...). Générique, pas liée à un schéma particulier : un
-# document au graphe de schémas densément interconnecté (composants qui se
-# référencent tous mutuellement, cas réel constaté sur le spec Stripe — ex.
-# PaymentIntent -> Charge -> Customer -> PaymentMethod -> ...) produit une
-# explosion combinatoire à la sérialisation JSON si on résout en chaîne sans
-# limite stricte : un objet partagé référencé depuis N endroits, chacun
-# référencé depuis M autres, doit être dupliqué en toutes lettres à chaque
-# occurrence (JSON n'a pas de notion de partage), ce qui fait exploser la
-# taille du texte de façon combinatoire avec la profondeur. Le cas visé par
-# la résolution (un paramètre référencé une fois par un endpoint) est un
-# seul niveau d'indirection — au-delà, le pointeur $ref est laissé tel quel
-# plutôt que de risquer un MemoryError sur un graphe de schémas dense.
-_MAX_REF_DEPTH = 1
+# même un ref -> ...). Un document au graphe de schémas densément
+# interconnecté (composants qui se référencent tous mutuellement, cas réel
+# constaté sur un spec OpenAPI volumineux — ex. PaymentIntent -> Charge ->
+# Customer -> PaymentMethod -> ...) produit une explosion combinatoire à la
+# sérialisation JSON si on résout en chaîne sans limite stricte : un objet
+# partagé référencé depuis N endroits, chacun référencé depuis M autres, doit
+# être dupliqué en toutes lettres à chaque occurrence (JSON n'a pas de notion
+# de partage), ce qui fait exploser la taille du texte de façon combinatoire
+# avec la profondeur.
+#
+# Pas de limite fixe unique : un document dont les $ref pointent surtout vers
+# une poignée de cibles partagées (ex. un paramètre référencé par de
+# nombreux endpoints — beaucoup d'occurrences, peu de cibles distinctes) n'a
+# pas ce risque et peut être résolu plus profondément sans danger. Seul un
+# document où les cibles sont majoritairement distinctes (signe d'un web de
+# composants réellement interconnectés, chacun pouvant à son tour référencer
+# autre chose) doit rester restreint à un seul niveau. La densité est donc
+# mesurée sur le document lui-même (ratio cibles $ref uniques / occurrences
+# totales, voir _estimate_max_ref_depth) plutôt que fixée a priori — mesure
+# structurelle générique (propriété du format, pas de la sémantique d'un
+# corpus donné), calibrée empiriquement sur les deux cas réels rencontrés :
+# ratio ~0.08 (beaucoup de réutilisation, sûr) vs ~0.37 (interconnexion
+# dense, risqué).
+_REF_DEPTH_DENSITY_THRESHOLD = 0.15
+_MAX_REF_DEPTH_DENSE = 1
+_MAX_REF_DEPTH_SPARSE = 3
 
 
 class StructuredDataBuilder(AbstractDOMBuilder):
@@ -80,6 +94,7 @@ class StructuredDataBuilder(AbstractDOMBuilder):
         data = self._load(source_path)
         self._ref_root = data
         self._ref_cache: dict[str, Any] = {}
+        self._max_ref_depth = self._estimate_max_ref_depth(data)
 
         root = self._create_root_node(source_path, config)
         tree = DocumentTree(root_id=root.id, source_id=config.source_id, source_path=source_path)
@@ -109,6 +124,24 @@ class StructuredDataBuilder(AbstractDOMBuilder):
     # résolus. `_ref_cache` reste mémoïsé sur toute la durée d'un build().
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _estimate_max_ref_depth(data: Any) -> int:
+        """Sonde la densité du graphe $ref du document (une passe, avant
+        toute résolution) pour choisir la profondeur max : ratio entre le
+        nombre de cibles $ref distinctes et le nombre total d'occurrences.
+        Coût borné à une sérialisation du document brut (pas de résolution
+        récursive ici) — sans rapport avec l'explosion combinatoire que la
+        limite de profondeur elle-même prévient."""
+        try:
+            text = json.dumps(data, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            return _MAX_REF_DEPTH_DENSE
+        refs = re.findall(r'"\$ref"\s*:\s*"(#/[^"]+)"', text)
+        if not refs:
+            return _MAX_REF_DEPTH_SPARSE
+        density = len(set(refs)) / len(refs)
+        return _MAX_REF_DEPTH_DENSE if density > _REF_DEPTH_DENSITY_THRESHOLD else _MAX_REF_DEPTH_SPARSE
+
     def _resolve_refs(self, value: Any, source_path: str) -> Any:
         """Remplace récursivement tout {"$ref": "#/a/b/c"} par le sous-arbre
         pointé (JSON Pointer, RFC 6901) à l'intérieur de `value` seulement.
@@ -131,7 +164,7 @@ class StructuredDataBuilder(AbstractDOMBuilder):
                     if ref in seen:
                         logger.warning("ref_cycle_detected", source_path=source_path, ref=ref)
                         return node
-                    if depth >= _MAX_REF_DEPTH:
+                    if depth >= self._max_ref_depth:
                         logger.warning("ref_depth_limit_reached", source_path=source_path, ref=ref, depth=depth)
                         return node
                     try:
