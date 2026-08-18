@@ -17,12 +17,18 @@ class _CitationVerdict(BaseModel):
 
 
 _CITATION_ACCURACY_SYSTEM = (
-    "Étant donné une réponse et un passage cité à l'appui de cette réponse, "
-    "détermine si ce passage soutient effectivement une affirmation "
-    "présente dans la réponse. verdict=1 si le passage soutient "
-    "réellement une affirmation de la réponse, verdict=0 s'il est "
-    "hors-sujet ou ne la soutient pas. Réponds en JSON {reason, verdict}."
+    "Étant donné une affirmation précise et un passage cité à l'appui de "
+    "cette affirmation, détermine si ce passage soutient effectivement "
+    "l'affirmation. verdict=1 si le passage soutient réellement "
+    "l'affirmation, verdict=0 s'il est hors-sujet ou ne la soutient pas. "
+    "Réponds en JSON {reason, verdict}."
 )
+
+
+def _citation_field(citation, key: str, default=None):
+    if isinstance(citation, dict):
+        return citation.get(key, default)
+    return getattr(citation, key, default)
 
 
 def citation_accuracy(llm_client: BaseLLMClient, llm_config: LLMConfig, answer: str, citations: list) -> dict:
@@ -30,15 +36,22 @@ def citation_accuracy(llm_client: BaseLLMClient, llm_config: LLMConfig, answer: 
     effectivement l'affirmation qu'il est censé justifier — vérifié par un
     juge indépendant plutôt qu'auto-déclaré (le seul signal disponible
     jusqu'ici était `support_level`, produit par le générateur lui-même —
-    voir le biais corrigé sur Hallucination Rate, hallucination.py)."""
+    voir le biais corrigé sur Hallucination Rate, hallucination.py).
+
+    Le juge évalue chaque citation contre `claim` (l'affirmation précise
+    qu'elle appuie, cf. Citation/RawCitation) plutôt que contre `answer` en
+    entier — moins de bruit sémantique dans le jugement. `answer` sert de
+    repli générique pour des citations sérialisées avant l'ajout de `claim`
+    (ex. anciennes lignes de baseline_D_E_F_raw.jsonl)."""
     if not citations:
         return {"citation_accuracy": None, "n_citations": 0, "n_accurate": 0}
 
     config = llm_config.model_copy(update={"response_format": _CitationVerdict.model_json_schema()})
     accurate = 0
     for citation in citations:
-        text_span = citation.text_span if hasattr(citation, "text_span") else citation["text_span"]
-        prompt = f"Réponse :\n{answer}\n\nPassage cité :\n{text_span}"
+        text_span = _citation_field(citation, "text_span")
+        claim = _citation_field(citation, "claim") or answer
+        prompt = f"Affirmation à vérifier :\n{claim}\n\nPassage cité :\n{text_span}"
         messages = [
             LLMMessage(role="system", content=_CITATION_ACCURACY_SYSTEM),
             LLMMessage(role="user", content=prompt),
