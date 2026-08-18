@@ -57,7 +57,7 @@ class TestGenerator:
         chunk_id, chunk = sample_chunk
         content = (
             '{"answer": "symbol is required", '
-            f'"citations": [{{"chunk_id": "{chunk_id}", "text_span": "symbol is a required string parameter", "support_level": "fully_supported"}}], '
+            f'"citations": [{{"chunk_id": "{chunk_id}", "claim": "symbol is required", "text_span": "symbol is a required string parameter", "support_level": "fully_supported"}}], '
             '"confidence": 0.9, "sufficiency_score": 0.95}'
         )
         client = _FakeLLMClient(content)
