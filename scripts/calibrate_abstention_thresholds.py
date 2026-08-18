@@ -65,6 +65,7 @@ def collect() -> list[dict]:
     gen_config = LLMConfig(
         provider=settings.llm_provider, model=settings.llm_model, base_url=settings.llm_base_url,
         temperature=settings.llm_temperature, max_tokens=settings.llm_max_tokens, timeout=settings.llm_timeout,
+        repeat_penalty=settings.llm_repeat_penalty,
     )
     gen_client = LLMFactory.create(gen_config)
     generator = Generator(llm_client=gen_client, llm_config=gen_config, store=store)
@@ -87,10 +88,12 @@ def collect() -> list[dict]:
     for i, (q, should_abstain) in enumerate(questions):
         t0 = time.perf_counter()
         try:
-            retrieval = retriever.retrieve(query=q["question"], top_k=10)
+            retrieval = retriever.retrieve(
+                query=q["question"], top_k=10, k_dense=settings.retrieval_k_dense, k_sparse=settings.retrieval_k_sparse
+            )
             chunks = retrieval["results"]
-            sufficiency = sufficiency_checker.check(q["question"], chunks, gen_config)
             diff_explanation = QueryPipeline._diff_explanation(retrieval)
+            sufficiency = sufficiency_checker.check(q["question"], chunks, gen_config, diff_explanation=diff_explanation)
             generation = generator.generate(q["question"], chunks, diff_explanation=diff_explanation)
             reranker_scores = [c.get("rerank_score", c.get("score", 0.0)) for c in chunks]
 
