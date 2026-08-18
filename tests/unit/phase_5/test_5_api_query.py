@@ -41,6 +41,7 @@ def _sample_result(**overrides) -> PipelineResult:
                 document="doc.yaml",
                 text_span="span",
                 support_level="fully_supported",
+                claim="the claim",
             )
         ],
         confidence=0.9,
