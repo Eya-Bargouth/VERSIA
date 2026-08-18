@@ -95,7 +95,15 @@ def build_components():
         model="qwen2.5:7b-instruct",
         base_url=settings.llm_base_url,
         temperature=0.1,
-        max_tokens=300,
+        # 300 tronquait le JSON du juge sur les verdicts qui listent des
+        # claims (faithfulness, context_recall) pour les questions verboses
+        # (conflit de version) — même symptôme que llm_max_tokens=2048 côté
+        # générateur (settings.py). 1024 plutôt que 2048 : compromis constaté
+        # en conditions réelles — 2048 en CPU (num_gpu=0, qwen2.5:7b-instruct)
+        # faisait passer chaque question de ~5s à ~340s (5 appels juge par
+        # question), un facteur ~70 jugé disproportionné pour le gain de
+        # marge restant au-delà de 1024.
+        max_tokens=1024,
         num_gpu=0,  # juge indépendant, CPU — évite la contention VRAM et le biais d'auto-évaluation
         repeat_penalty=settings.llm_repeat_penalty,
     )
@@ -122,9 +130,12 @@ def build_components():
 def run_one_question(components: dict, q: dict) -> dict:
     retriever = components["retriever"]
     gen_config = components["gen_config"]
+    settings = get_settings()
 
     t0 = time.perf_counter()
-    retrieval = retriever.retrieve(query=q["question"], top_k=10)
+    retrieval = retriever.retrieve(
+        query=q["question"], top_k=10, k_dense=settings.retrieval_k_dense, k_sparse=settings.retrieval_k_sparse
+    )
     chunks = retrieval["results"]
 
     diff_explanation = QueryPipeline._diff_explanation(retrieval)
@@ -235,6 +246,17 @@ def main():
                 record = run_one_question_with_retry(components, q)
             except Exception as exc:
                 print(f"[{i}/{len(questions)}] ERREUR (après {RETRY_MAX_ATTEMPTS} tentatives) sur '{q['question'][:60]}': {exc}")
+                # Cause persistée (pas seulement affichée sur stdout, perdu à
+                # la fin du run) : sans ça, un échec après retry ne laisse
+                # aucune trace exploitable pour diagnostiquer sa cause réelle
+                # après coup (constaté sur les 19/50 questions perdues de
+                # l'évaluation précédente — cause jamais reconstituable).
+                raw_f.write(json.dumps(
+                    {"question": q["question"], "category": q.get("category"),
+                     "error": f"{type(exc).__name__}: {exc}", "attempts": RETRY_MAX_ATTEMPTS},
+                    ensure_ascii=False,
+                ) + "\n")
+                raw_f.flush()
                 continue
             records.append(record)
             raw_f.write(json.dumps(record, ensure_ascii=False) + "\n")
