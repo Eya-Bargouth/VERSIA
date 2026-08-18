@@ -87,7 +87,10 @@ def build_retriever() -> HybridRetriever:
 
 
 def confirm_multi_source(retriever: HybridRetriever, theme: str) -> list[dict] | None:
-    result = retriever.retrieve(query=theme, top_k=TOP_K, k_dense=20, k_sparse=20)
+    settings = get_settings()
+    result = retriever.retrieve(
+        query=theme, top_k=TOP_K, k_dense=settings.retrieval_k_dense, k_sparse=settings.retrieval_k_sparse
+    )
     chunks = result.get("results", [])
     by_source: dict[str, dict] = {}
     for c in chunks:
