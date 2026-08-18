@@ -17,19 +17,25 @@ class Citation(BaseModel):
     line: int | None = None
     text_span: str
     support_level: Literal["fully_supported", "partially_supported", "no_support"]
+    # Affirmation précise de `answer` que cette citation appuie (pas la
+    # réponse entière) — permet au juge Citation Accuracy (spec §15.3) de
+    # vérifier le passage contre la claim qu'il est censé soutenir plutôt que
+    # contre l'ensemble de la réponse, moins bruité (voir reliability_metrics.py).
+    claim: str
 
 
 class RawCitation(BaseModel):
     """Citation telle que produite par le LLM — uniquement ce qu'il peut
-    connaître (chunk cité, extrait, niveau de support). `document`, `section`,
-    `page`, `line` et `citation_id` sont remplis ensuite par
-    ``src.generation.citation`` depuis le payload Qdrant déjà connu, plutôt
-    que de faire reproduire ces métadonnées au LLM (risque d'erreur inutile
-    sur des données qu'on possède déjà avec certitude)."""
+    connaître (chunk cité, extrait, niveau de support, affirmation appuyée).
+    `document`, `section`, `page`, `line` et `citation_id` sont remplis
+    ensuite par ``src.generation.citation`` depuis le payload Qdrant déjà
+    connu, plutôt que de faire reproduire ces métadonnées au LLM (risque
+    d'erreur inutile sur des données qu'on possède déjà avec certitude)."""
 
     chunk_id: UUID
     text_span: str
     support_level: Literal["fully_supported", "partially_supported", "no_support"]
+    claim: str
 
 
 class RawGenerationOutput(BaseModel):
