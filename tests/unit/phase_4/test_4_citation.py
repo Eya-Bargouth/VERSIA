@@ -23,7 +23,7 @@ class TestEnrichCitations:
                 },
             }
         ]
-        raw = [RawCitation(chunk_id=chunk_id, text_span="symbol is required", support_level="fully_supported")]
+        raw = [RawCitation(chunk_id=chunk_id, claim="the claim", text_span="symbol is required", support_level="fully_supported")]
 
         result = enrich_citations(raw, chunks)
 
@@ -44,7 +44,7 @@ class TestEnrichCitations:
                 },
             }
         ]
-        raw = [RawCitation(chunk_id=chunk_id, text_span="symbol is required", support_level="fully_supported")]
+        raw = [RawCitation(chunk_id=chunk_id, claim="the claim", text_span="symbol is required", support_level="fully_supported")]
 
         result = enrich_citations(raw, chunks)
 
@@ -59,7 +59,7 @@ class TestEnrichCitations:
         real_id = uuid4()
         chunks = [{"chunk_id": str(real_id), "payload": {}}]
         raw = [
-            RawCitation(chunk_id=uuid4(), text_span="made up", support_level="fully_supported"),
+            RawCitation(chunk_id=uuid4(), claim="the claim", text_span="made up", support_level="fully_supported"),
         ]
 
         result = enrich_citations(raw, chunks)
@@ -70,8 +70,8 @@ class TestEnrichCitations:
         id1, id2 = uuid4(), uuid4()
         chunks = [{"chunk_id": str(id1), "payload": {}}, {"chunk_id": str(id2), "payload": {}}]
         raw = [
-            RawCitation(chunk_id=id1, text_span="a", support_level="fully_supported"),
-            RawCitation(chunk_id=id2, text_span="b", support_level="partially_supported"),
+            RawCitation(chunk_id=id1, claim="the claim", text_span="a", support_level="fully_supported"),
+            RawCitation(chunk_id=id2, claim="the claim", text_span="b", support_level="partially_supported"),
         ]
 
         result = enrich_citations(raw, chunks)
@@ -90,7 +90,7 @@ class TestGroundingFallback:
     def test_span_absent_from_chunk_falls_back_to_full_text(self):
         chunk_id = uuid4()
         chunks = [{"chunk_id": str(chunk_id), "text": "Le paramètre symbol est requis.", "payload": {}}]
-        raw = [RawCitation(chunk_id=chunk_id, text_span="ceci n'apparaît nulle part dans le chunk", support_level="fully_supported")]
+        raw = [RawCitation(chunk_id=chunk_id, claim="the claim", text_span="ceci n'apparaît nulle part dans le chunk", support_level="fully_supported")]
 
         result = enrich_citations(raw, chunks)
 
@@ -100,7 +100,7 @@ class TestGroundingFallback:
         chunk_id = uuid4()
         chunk_text = "Le paramètre symbol est requis pour cet endpoint."
         chunks = [{"chunk_id": str(chunk_id), "text": chunk_text, "payload": {}}]
-        raw = [RawCitation(chunk_id=chunk_id, text_span="symbol est requis", support_level="fully_supported")]
+        raw = [RawCitation(chunk_id=chunk_id, claim="the claim", text_span="symbol est requis", support_level="fully_supported")]
 
         result = enrich_citations(raw, chunks)
 
@@ -113,7 +113,7 @@ class TestGroundingFallback:
         chunk_id = uuid4()
         chunk_text = '"parameters": [\n    {\n      "name": "symbol",\n      "required": true\n    }\n  ]'
         chunks = [{"chunk_id": str(chunk_id), "text": chunk_text, "payload": {}}]
-        raw = [RawCitation(chunk_id=chunk_id, text_span='"name": "symbol", "required": true', support_level="fully_supported")]
+        raw = [RawCitation(chunk_id=chunk_id, claim="the claim", text_span='"name": "symbol", "required": true', support_level="fully_supported")]
 
         result = enrich_citations(raw, chunks)
 
@@ -125,7 +125,7 @@ class TestGroundingFallback:
         plutôt que de le vider silencieusement."""
         chunk_id = uuid4()
         chunks = [{"chunk_id": str(chunk_id), "payload": {}}]
-        raw = [RawCitation(chunk_id=chunk_id, text_span="symbol is required", support_level="fully_supported")]
+        raw = [RawCitation(chunk_id=chunk_id, claim="the claim", text_span="symbol is required", support_level="fully_supported")]
 
         result = enrich_citations(raw, chunks)
 
