@@ -74,8 +74,8 @@ class HybridRetriever:
         query_sparse: Optional[Dict[int, float]] = None,
         planner_output: Optional[Dict[str, Any]] = None,
         top_k: int = 10,
-        k_dense: int = 10,
-        k_sparse: int = 10,
+        k_dense: int = 15,
+        k_sparse: int = 15,
     ) -> Dict[str, Any]:
         """Hybrid retrieval: plan → dense/sparse → RRF → rerank.
 
