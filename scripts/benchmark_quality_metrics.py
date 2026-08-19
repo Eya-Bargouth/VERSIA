@@ -35,7 +35,7 @@ TEST_QUERIES = [
     {
         "query": "POST /v1/orders parameters",
         "expected_sources": ["stripe_specs", "binance_spot"],  # Peut venir de Stripe ou Binance docs
-        "intent": "navigational"
+        "intent": "factual"
     },
     {
         "query": "How to authenticate API request",
