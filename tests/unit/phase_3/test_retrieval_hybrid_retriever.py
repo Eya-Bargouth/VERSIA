@@ -55,7 +55,7 @@ class TestHybridSearchTriggersReranking:
             "query",
             query_embedding=np.zeros(1024, dtype=np.float32),
             query_sparse={0: 1.0},
-            planner_output={"intent": "navigational", "entity": None, "filters": {}},
+            planner_output={"intent": "ambiguous", "entity": None, "filters": {}},
             top_k=5,
             k_dense=10,
             k_sparse=10,
@@ -84,10 +84,172 @@ class TestHybridSearchTriggersReranking:
             "query",
             query_embedding=np.zeros(1024, dtype=np.float32),
             query_sparse={0: 1.0},
-            planner_output={"intent": "navigational", "entity": None, "filters": {}},
+            planner_output={"intent": "ambiguous", "entity": None, "filters": {}},
             top_k=5,
             k_dense=10,
             k_sparse=10,
         )
 
         assert rerank_calls and rerank_calls[0] > 5
+
+
+class TestVersionSiblingDedup:
+    """Une source versionnée dont une section n'a pas changé d'une version à
+    l'autre produit des chunks quasi identiques dans chaque fichier de
+    version — ils ne doivent pas se marcher dessus dans le top-k."""
+
+    def _version_result(self, hierarchy_path: str, version_order: int, score: float = 0.9, text: str | None = None):
+        return RetrievalResult(
+            chunk_id=uuid4(),
+            score=score,
+            source="dense",
+            payload={
+                "text": text if text is not None else f"contenu {hierarchy_path} v{version_order}",
+                "hierarchy_path": hierarchy_path,
+                "source_id": "stripe",
+                "version_order": version_order,
+            },
+        )
+
+    def test_keeps_only_highest_version_order_per_hierarchy_path(self, monkeypatch):
+        retriever = HybridRetriever(store=None, use_reranker=False)
+        siblings = [
+            self._version_result("paths./v1/apps/secrets.get", 1),
+            self._version_result("paths./v1/apps/secrets.get", 3),
+            self._version_result("paths./v1/apps/secrets.get", 2),
+        ]
+        monkeypatch.setattr(retriever.dense_search, "search_dense", lambda *a, **k: siblings)
+        monkeypatch.setattr(retriever.sparse_search, "search_sparse", lambda *a, **k: [])
+
+        result = retriever.retrieve(
+            "query",
+            query_embedding=np.zeros(1024, dtype=np.float32),
+            query_sparse={0: 1.0},
+            planner_output={"intent": "factual", "entity": None, "filters": {}},
+            top_k=10,
+        )
+
+        kept = result["results"]
+        assert len(kept) == 1
+        assert kept[0]["payload"]["version_order"] == 3
+
+    def test_comparative_intent_keeps_all_versions(self, monkeypatch):
+        retriever = HybridRetriever(store=None, use_reranker=False)
+        siblings = [
+            self._version_result("paths./v1/apps/secrets.get", 1),
+            self._version_result("paths./v1/apps/secrets.get", 2),
+        ]
+        monkeypatch.setattr(retriever.dense_search, "search_dense", lambda *a, **k: siblings)
+        monkeypatch.setattr(retriever.sparse_search, "search_sparse", lambda *a, **k: [])
+
+        result = retriever.retrieve(
+            "query",
+            query_embedding=np.zeros(1024, dtype=np.float32),
+            query_sparse={0: 1.0},
+            planner_output={"intent": "comparative", "entity": None, "filters": {"version_tags": ["tagA", "tagB"]}},
+            top_k=10,
+        )
+
+        assert len(result["results"]) == 2
+
+    def test_comparative_intent_collapses_identical_content(self, monkeypatch):
+        """Contenu inchangé d'une version à l'autre : même en intent
+        comparatif, comparer 4 copies identiques n'apporte rien — seule la
+        plus récente est gardée."""
+        retriever = HybridRetriever(store=None, use_reranker=False)
+        same_text = "Le paramètre symbol est requis."
+        siblings = [
+            self._version_result("paths./v1/apps/secrets.get", 1, text=same_text),
+            self._version_result("paths./v1/apps/secrets.get", 2, text=same_text),
+            self._version_result("paths./v1/apps/secrets.get", 3, text=same_text),
+        ]
+        monkeypatch.setattr(retriever.dense_search, "search_dense", lambda *a, **k: siblings)
+        monkeypatch.setattr(retriever.sparse_search, "search_sparse", lambda *a, **k: [])
+
+        result = retriever.retrieve(
+            "query",
+            query_embedding=np.zeros(1024, dtype=np.float32),
+            query_sparse={0: 1.0},
+            planner_output={"intent": "comparative", "entity": None, "filters": {"version_tags": ["tagA", "tagB"]}},
+            top_k=10,
+        )
+
+        kept = result["results"]
+        assert len(kept) == 1
+        assert kept[0]["payload"]["version_order"] == 3
+
+    def test_comparative_intent_keeps_distinct_drops_identical(self, monkeypatch):
+        """Groupe mixte : 2 versions au contenu réellement différent (gardées
+        toutes les deux) + 1 version dont le texte duplique l'une d'elles
+        (éliminée)."""
+        retriever = HybridRetriever(store=None, use_reranker=False)
+        siblings = [
+            self._version_result("paths./v1/x.get", 1, text="ancien comportement"),
+            self._version_result("paths./v1/x.get", 2, text="nouveau comportement"),
+            self._version_result("paths./v1/x.get", 3, text="nouveau comportement"),  # doublon de v2
+        ]
+        monkeypatch.setattr(retriever.dense_search, "search_dense", lambda *a, **k: siblings)
+        monkeypatch.setattr(retriever.sparse_search, "search_sparse", lambda *a, **k: [])
+
+        result = retriever.retrieve(
+            "query",
+            query_embedding=np.zeros(1024, dtype=np.float32),
+            query_sparse={0: 1.0},
+            planner_output={"intent": "comparative", "entity": None, "filters": {"version_tags": ["tagA", "tagB"]}},
+            top_k=10,
+        )
+
+        kept_orders = sorted(r["payload"]["version_order"] for r in result["results"])
+        assert kept_orders == [1, 3]  # v3 gagne sur v2 (même texte, plus récente), v1 distinct gardé
+
+    def test_comparative_without_version_signal_leaves_candidates_untouched(self, monkeypatch):
+        """Régression : une question comparative qui compare des CONCEPTS
+        (ex. "différence entre l'authentification TLS et l'API Stripe"), pas
+        des versions — aucun tag détecté par le planner (filters vide) — ne
+        doit subir aucun dédup. Sans ce garde-fou, une version "jugée
+        identique en contenu" pouvait être éliminée alors qu'elle était
+        justement celle attendue par la question (mesuré : Recall@10
+        multi_source/ambiguous 0.6→0.2)."""
+        retriever = HybridRetriever(store=None, use_reranker=False)
+        same_text = "contenu inchangé"
+        siblings = [
+            self._version_result("paths./v1/x.get", 1, text=same_text),
+            self._version_result("paths./v1/x.get", 3, text=same_text),
+        ]
+        monkeypatch.setattr(retriever.dense_search, "search_dense", lambda *a, **k: siblings)
+        monkeypatch.setattr(retriever.sparse_search, "search_sparse", lambda *a, **k: [])
+
+        result = retriever.retrieve(
+            "query",
+            query_embedding=np.zeros(1024, dtype=np.float32),
+            query_sparse={0: 1.0},
+            planner_output={"intent": "comparative", "entity": None, "filters": {}},
+            top_k=10,
+        )
+
+        assert len(result["results"]) == 2  # aucun candidat éliminé
+
+    def test_unversioned_chunks_never_merged(self, monkeypatch):
+        retriever = HybridRetriever(store=None, use_reranker=False)
+        unversioned = [
+            RetrievalResult(
+                chunk_id=uuid4(), score=0.9, source="dense",
+                payload={"text": "a", "hierarchy_path": "same.path", "source_id": "owasp_cheatsheets"},
+            ),
+            RetrievalResult(
+                chunk_id=uuid4(), score=0.8, source="dense",
+                payload={"text": "b", "hierarchy_path": "same.path", "source_id": "owasp_cheatsheets"},
+            ),
+        ]
+        monkeypatch.setattr(retriever.dense_search, "search_dense", lambda *a, **k: unversioned)
+        monkeypatch.setattr(retriever.sparse_search, "search_sparse", lambda *a, **k: [])
+
+        result = retriever.retrieve(
+            "query",
+            query_embedding=np.zeros(1024, dtype=np.float32),
+            query_sparse={0: 1.0},
+            planner_output={"intent": "factual", "entity": None, "filters": {}},
+            top_k=10,
+        )
+
+        assert len(result["results"]) == 2
