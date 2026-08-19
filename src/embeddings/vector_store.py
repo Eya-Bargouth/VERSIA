@@ -11,6 +11,7 @@ from qdrant_client.models import (
     Distance,
     FieldCondition,
     Filter,
+    MatchAny,
     MatchValue,
     NamedVector,
     PointStruct,
@@ -222,6 +223,15 @@ class QdrantStore:
         return points[0].payload if points else None
 
     @staticmethod
+    def _build_match(match_dict: dict) -> MatchValue | MatchAny:
+        """``{"value": x}`` → égalité exacte. ``{"any": [x, y]}`` → une valeur
+        parmi plusieurs (ex. comparer deux versions nommées explicitement
+        plutôt que d'en filtrer une seule) — voir QueryPlanner filters."""
+        if "any" in match_dict:
+            return MatchAny(any=match_dict["any"])
+        return MatchValue(value=match_dict["value"])
+
+    @staticmethod
     def _build_filter(filter_dict: dict) -> Filter | None:
         """Construit un Filter Qdrant depuis un dict.
 
@@ -229,6 +239,9 @@ class QdrantStore:
         1. Plat (legacy)  : {"source_id": "stripe_specs"}
         2. Qdrant-style   : {"key": "source_id", "match": {"value": "stripe_specs"}}
         3. Combiné (must) : {"must": [{"key": ..., "match": ...}, ...]}
+
+        Le champ ``match`` accepte soit ``{"value": x}`` (égalité), soit
+        ``{"any": [x, y, ...]}`` (une valeur parmi plusieurs).
         """
         if not filter_dict:
             return None
@@ -239,7 +252,7 @@ class QdrantStore:
             for cond in filter_dict["must"]:
                 if "key" in cond and "match" in cond:
                     conditions.append(
-                        FieldCondition(key=cond["key"], match=MatchValue(value=cond["match"]["value"]))
+                        FieldCondition(key=cond["key"], match=QdrantStore._build_match(cond["match"]))
                     )
             return Filter(must=conditions) if conditions else None
 
@@ -249,7 +262,7 @@ class QdrantStore:
                 must=[
                     FieldCondition(
                         key=filter_dict["key"],
-                        match=MatchValue(value=filter_dict["match"]["value"]),
+                        match=QdrantStore._build_match(filter_dict["match"]),
                     )
                 ]
             )
@@ -257,9 +270,10 @@ class QdrantStore:
         # Format 1 — flat key:value
         must_conditions = []
         for key, value in filter_dict.items():
-            if isinstance(value, dict) and "match" in value:
+            if isinstance(value, dict) and ("match" in value or "any" in value):
+                match_dict = value["match"] if "match" in value else value
                 must_conditions.append(
-                    FieldCondition(key=key, match=MatchValue(value=value["match"]["value"]))
+                    FieldCondition(key=key, match=QdrantStore._build_match(match_dict))
                 )
             else:
                 must_conditions.append(
