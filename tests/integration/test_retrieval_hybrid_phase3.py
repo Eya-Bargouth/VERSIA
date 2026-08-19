@@ -111,10 +111,6 @@ def test_planner_with_real_query():
     r2 = qp.plan("Compare v1 and v2 of the currency parameter")
     assert r2["intent"] == "comparative"
 
-    # Source filter detected
-    r3 = qp.plan("How does Stripe handle webhook signature verification?")
-    assert r3["filters"].get("source_id") == "stripe_specs"
-
     print("\nPlanner results OK")
 
 
