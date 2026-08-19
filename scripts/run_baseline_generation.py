@@ -62,7 +62,6 @@ OUT_PATH = _PROJECT_ROOT / "data" / "eval" / "baseline_D_E_F_results.json"
 RAW_OUT_PATH = _PROJECT_ROOT / "data" / "eval" / "baseline_D_E_F_raw.jsonl"
 
 CONFLICT_SUFFICIENCY_THRESHOLD = 0.7
-CONTEXT_PRECISION_MAX_CHUNKS = 3  # limite le coût judge (7b CPU) par question
 RETRY_MAX_ATTEMPTS = 2  # timeout Ollama / échec de validation JSON du juge sont transitoires
 RETRY_BACKOFF_SECONDS = 5
 
@@ -106,12 +105,26 @@ def build_components():
         max_tokens=1024,
         num_gpu=0,  # juge indépendant, CPU — évite la contention VRAM et le biais d'auto-évaluation
         repeat_penalty=settings.llm_repeat_penalty,
+        # 120s (défaut LLMConfig) trop court depuis le passage de
+        # context_precision à 10 chunks (#4) : un appel juge par chunk
+        # (~13s/appel mesuré en CPU), et Ollama ralentit sous charge soutenue
+        # (dérive observée sur le run complet précédent — questions de plus
+        # en plus lentes après ~1h30). 300s laisse de la marge sans changer
+        # le nombre de chunks évalués.
+        timeout=300,
     )
     gen_client = LLMFactory.create(gen_config)
     judge_client = LLMFactory.create(judge_config)
 
     generator = Generator(llm_client=gen_client, llm_config=gen_config, store=store)
-    sufficiency_checker = SufficiencyChecker(llm_client=gen_client)
+    # judge_client (7b) plutôt que gen_client (3b, défaut projet) : le 3b
+    # mal-interprète des dumps JSON de spec pourtant sans ambiguïté (ex.
+    # verdict "insufficient" sur un paramètre avec "required": true présent
+    # tel quel dans le contexte, raison donnée fausse — "ne mentionne pas de
+    # paramètres requis") — mesuré en conditions réelles, pas supposé. Limité
+    # à ce script d'éval : la prod (src/api/dependencies.py) n'a qu'un seul
+    # modèle chargé, lui ajouter un second changerait son empreinte réelle.
+    sufficiency_checker = SufficiencyChecker(llm_client=judge_client)
     abstention_gate = AbstentionGate()
     conflict_detector = ConflictDetector(llm_client=gen_client, diff_dir=_PROJECT_ROOT / "data" / "diffs")
 
@@ -139,7 +152,9 @@ def run_one_question(components: dict, q: dict) -> dict:
     chunks = retrieval["results"]
 
     diff_explanation = QueryPipeline._diff_explanation(retrieval)
-    sufficiency = components["sufficiency_checker"].check(q["question"], chunks, gen_config, diff_explanation=diff_explanation)
+    sufficiency = components["sufficiency_checker"].check(
+        q["question"], chunks, components["judge_config"], diff_explanation=diff_explanation
+    )
     generation = components["generator"].generate(q["question"], chunks, diff_explanation=diff_explanation)
 
     conflicts = []
@@ -169,8 +184,18 @@ def run_one_question(components: dict, q: dict) -> dict:
     final_answer, final_citations = QueryPipeline._finalize_answer(decision, generation)
     latency_ms = (time.perf_counter() - t0) * 1000
 
+    # diff_explanation inclus : c'est une partie réelle du contexte que le
+    # générateur a reçu (voir build_user_message) — sans lui, toute
+    # affirmation sourcée depuis le diff plutôt qu'un chunk brut était jugée
+    # "non supportée" par erreur (mesuré : Faithfulness 0.13 sur
+    # version_conflict vs 0.61 sur factual, largement artificiel).
     context_text = "\n---\n".join(c.get("text", "") for c in chunks)
-    chunk_texts = [c.get("text", "") for c in chunks[:CONTEXT_PRECISION_MAX_CHUNKS]]
+    if diff_explanation:
+        context_text += "\n---\n" + diff_explanation
+    # Les 10 chunks réellement utilisés pour la génération, pas seulement les
+    # 3 premiers — le plafond initial (coût du juge 7b CPU) sous-estimait la
+    # précision réelle du contexte fourni au générateur.
+    chunk_texts = [c.get("text", "") for c in chunks]
 
     judge_client, judge_config = components["judge_client"], components["judge_config"]
     precision_answer = q.get("expected_answer") or generation.answer
@@ -187,6 +212,14 @@ def run_one_question(components: dict, q: dict) -> dict:
         "category": q["category"],
         "requires_obsolescence_check": q.get("requires_obsolescence_check", False),
         "expected_sources": q.get("expected_sources", []),
+        # Calculé par QueryPlanner à chaque requête (voir hybrid_retriever.py)
+        # mais jamais persisté jusqu'ici — aucune comparaison possible contre
+        # `category` (vérité terrain) sans le garder. Pas le même vocabulaire
+        # (intent = comment router la requête, category = type de question
+        # du jeu de test) : rapprochement valide seulement pour factual↔factual,
+        # version_conflict↔comparative, ambiguous↔ambiguous — multi_source et
+        # abstention n'ont pas de correspondance attendue unique.
+        "planner_intent": retrieval.get("planner_intent"),
         "raw_answer": generation.answer,
         "raw_citations": [c.model_dump(mode="json") for c in generation.citations],
         "final_answer": final_answer,
