@@ -5,12 +5,36 @@ import numpy as np
 from uuid import uuid4
 
 from qdrant_client import QdrantClient
+from qdrant_client.models import MatchAny, MatchValue
 
 from src.embeddings.vector_store import QdrantStore
 from src.ingestion.metadata import Chunk, ChunkMetadata
 from src.dom.models import NodeType
 
 pytestmark = pytest.mark.phase2
+
+
+class TestBuildFilter:
+    """``match: {"any": [...]}`` — comparer une question à plusieurs versions
+    nommées explicitement plutôt qu'une seule (voir QueryPlanner filters,
+    audit Precision@10)."""
+
+    def test_match_value_single_condition(self):
+        f = QdrantStore._build_filter({"key": "version_tag", "match": {"value": "v2323"}})
+        assert isinstance(f.must[0].match, MatchValue)
+        assert f.must[0].match.value == "v2323"
+
+    def test_match_any_single_condition(self):
+        f = QdrantStore._build_filter({"key": "version_tag", "match": {"any": ["legacy", "v2213"]}})
+        assert isinstance(f.must[0].match, MatchAny)
+        assert f.must[0].match.any == ["legacy", "v2213"]
+
+    def test_match_any_inside_must_list(self):
+        f = QdrantStore._build_filter(
+            {"must": [{"key": "version_tag", "match": {"any": ["legacy", "v2213"]}}]}
+        )
+        assert isinstance(f.must[0].match, MatchAny)
+        assert f.must[0].match.any == ["legacy", "v2213"]
 
 
 class TestQdrantStore:
