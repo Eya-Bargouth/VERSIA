@@ -84,9 +84,11 @@ Le reranker (C) améliore le MRR et le nDCG (meilleur classement) mais pas le Re
 |---|---|---|
 | Faithfulness | 0.448 | juge LLM (qwen2.5:7b), moyenne sur les 8 réponses données |
 | Answer Relevancy | 0.590 | idem |
-| Context Precision | 0.373 | idem, sans référence |
+| Context Precision | 0.373 | idem, sans référence — **calculé sur les 3 premiers chunks seulement** (`CONTEXT_PRECISION_MAX_CHUNKS`, `scripts/run_baseline_generation.py`), pas les 10 retrouvés ; voir §6 |
 | Context Recall | 0.393 | sous-ensemble template (20 questions avec `expected_answer`) |
 | **Hallucination Rate** | **0.0** | aucune citation `no_support` parmi les réponses données |
+| **Citation Accuracy** (spec §15.3, cible >0.90) | **0.388** | juge indépendant par citation, sur les réponses données (n=31/50, voir §9) — mesurée avant la dernière ré-ingestion (voir §6) |
+| **Sufficiency Precision** (spec §15.3, cible >0.85) | **0.625** | verdicts "insufficient" du SufficiencyChecker vs vérité terrain (n=31/50, voir §9) — mesurée avant la dernière ré-ingestion (voir §6) |
 | Taux de réponse | 19% (8/42) | — |
 
 **Par catégorie** (répond / total) :
@@ -123,12 +125,13 @@ Le **0/15 sur les questions de conflit de versions** est le résultat le plus ne
 
 ## 6. Limites connues de cette évaluation elle-même
 
-- **8/50 questions perdues** à des erreurs transitoires (3× validation Pydantic du juge sur une sortie LLM malformée, 3× timeout Ollama sous charge soutenue, 2× autres) — le script continue sans planter (comportement voulu), mais N=42 pas 50 pour les baselines D/E/F.
-- **Hallucination Rate auto-déclaré** : dérivé du `support_level` que le LLM générateur s'attribue à lui-même à chaque citation (style Self-RAG), pas d'un juge indépendant vérifiant chaque affirmation contre le texte source. Un vrai 0% d'hallucination serait à confirmer par un second passage (Faithfulness du juge indépendant va dans le même sens ici — 0.448 en moyenne, mais mesuré sur seulement 8 réponses).
-- **RAGAS maison, pas la librairie `ragas`** : le paquet installé (0.4.3) a une chaîne d'import cassée dans cet environnement (incompatibilité avec `langchain-community` installé) — décision actée d'implémenter Faithfulness/Answer Relevancy/Context Precision/Context Recall nous-mêmes via le LLM juge local plutôt que réparer la dépendance.
-- **`LLMFallbackDetector` (conflits textuels inter-sources) toujours non validé formellement** — le taux de faux conflits mesuré (0%) porte sur 27 questions qui n'en attendaient pas, pas sur un jeu dédié de paires contradictoires connues.
-- **Bug OWASP `list_item` vide** (241/374 chunks vides sur l'ancien corpus, trouvé en Phase 5 avant le refactor) — jamais réinvestigué après le passage au chunking générique universel ; possible qu'il ait disparu de lui-même (le nouveau chunking ne filtre plus par `semantic_unit`) mais non vérifié.
-- **Indirection `$ref` OpenAPI (Binance)** : certains paramètres sont référencés (`"$ref": "#/components/parameters/interval"`) plutôt que dupliqués dans chaque endpoint. Le parcours générique ne résout pas ces références (résolution sémantique OpenAPI, hors périmètre générique assumé) — la définition existe comme chunk séparé (`components > parameters > interval`, vérifié), donc rien n'est perdu, mais répondre pleinement demande de retrouver deux chunks liés, pas un seul.
+- **8/50 questions perdues** à des erreurs transitoires (3× validation Pydantic du juge sur une sortie LLM malformée, 3× timeout Ollama sous charge soutenue, 2× autres) — le script continue sans planter (comportement voulu), mais N=42 pas 50 pour les baselines D/E/F. **Retry/backoff ajouté (voir §9)** ; N=50 complet pas encore ré-exécuté (coût temps).
+- **Hallucination Rate auto-déclaré** : dérivé du `support_level` que le LLM générateur s'attribue à lui-même à chaque citation (style Self-RAG), pas d'un juge indépendant vérifiant chaque affirmation contre le texte source. **Corrigé (voir §9)** — dérivé maintenant du Faithfulness du juge indépendant, 0.375 mesuré au lieu de 0.0.
+- **RAGAS maison, pas la librairie `ragas`** : le paquet installé (0.4.3) a une chaîne d'import cassée dans cet environnement (incompatibilité avec `langchain-community` installé) — décision actée d'implémenter Faithfulness/Answer Relevancy/Context Precision/Context Recall nous-mêmes via le LLM juge local plutôt que réparer la dépendance. **Algorithmes corrigés pour suivre fidèlement la méthode réelle de ragas (voir §9)** ; toujours pas la librairie elle-même (décision maintenue).
+- **`LLMFallbackDetector` (conflits textuels inter-sources) toujours non validé formellement** — le taux de faux conflits mesuré (0%) porte sur 27 questions qui n'en attendaient pas, pas sur un jeu dédié de paires contradictoires connues. Non traité dans la session de correction.
+- **Bug OWASP `list_item` vide** (241/374 chunks vides sur l'ancien corpus, trouvé en Phase 5 avant le refactor) — jamais réinvestigué après le passage au chunking générique universel ; possible qu'il ait disparu de lui-même (le nouveau chunking ne filtre plus par `semantic_unit`) mais non vérifié. **Revérifié et corrigé (voir §9)** — en fait pire que soupçonné (100% des éléments de liste markdown étaient vides sur tout le corpus, pas seulement OWASP), cause différente (parsing des tokens markdown-it-py).
+- **Indirection `$ref` OpenAPI (Binance)** : certains paramètres sont référencés (`"$ref": "#/components/parameters/interval"`) plutôt que dupliqués dans chaque endpoint. Le parcours générique ne résout pas ces références (résolution sémantique OpenAPI, hors périmètre générique assumé) — la définition existe comme chunk séparé (`components > parameters > interval`, vérifié), donc rien n'est perdu, mais répondre pleinement demande de retrouver deux chunks liés, pas un seul. **Résolu génériquement (voir §9)** — reste lent sur les schémas très interconnectés (Stripe), limite acceptée.
+- **Context Precision plafonné aux 3 premiers chunks retrouvés** (`CONTEXT_PRECISION_MAX_CHUNKS = 3`, `scripts/run_baseline_generation.py`), pas les 10 réellement utilisés pour la génération — limite le coût du juge (7b, CPU) par question. La valeur rapportée en §5.2 sous-estime donc potentiellement la précision réelle sur l'ensemble du contexte fourni au générateur.
 
 ---
 
@@ -139,6 +142,24 @@ Le **0/15 sur les questions de conflit de versions** est le résultat le plus ne
 3. **Reconsidérer le seuil de taille (2000 caractères) de `StructuredDataBuilder`** à la lumière de la baisse de Recall mesurée en §5.1 — un compromis à arbitrer avec l'utilisateur, pas une valeur à changer unilatéralement.
 4. **Ré-exécuter les 8 questions perdues** (§6) une fois le juge/Ollama stabilisés, pour un N=50 complet.
 5. **Vérifier si le bug OWASP `list_item`** (mentionné §6) persiste sur le corpus actuel.
+
+---
+
+## 9. Session de correction post-évaluation (2026-08-14)
+
+Recommandations 1 et 2 ci-dessus traitées, plus plusieurs autres écarts trouvés en vérifiant chaque composant avec de vraies données (pas en supposant qu'un composant déjà testé unitairement fonctionne réellement en conditions réelles) :
+
+- **`AbstentionGate` calibré** (recommandation 1) : `threshold_low` 0.4 → **0.25**, sur 49 questions réelles (39 in-corpus + 10 hors-corpus). Détail et méthodologie : docstring de `src/reliability/abstention.py`, script `scripts/calibrate_abstention_thresholds.py`.
+- **`detect_structural()` câblé dans `QueryPipeline`** (recommandation 2) : `_detect_conflicts()` fusionne maintenant conflits textuels et structurels. Vérifié sur une vraie question de conflit Stripe (`method=version_diff confidence=1.0`, explication tirée du vrai diff).
+- **Bug `list_item` markdown confirmé et corrigé** (recommandation 5) : pire que soupçonné — 100% des éléments de liste markdown étaient vides sur tout le corpus (6051/6051 sur les 120 fichiers OWASP), pas seulement le sous-ensemble estimé en Phase 5. Cause : le parcours de tokens ne sautait pas le wrapper `paragraph_open`/`paragraph_close` (masqué pour les listes "tight").
+- **`$ref` OpenAPI résolu**, avec une limite de profondeur ajoutée après un `MemoryError` réel sur le spec Stripe (graphe de schémas densément interconnecté — explosion combinatoire à la sérialisation JSON). Fonctionne rapidement sur Binance (2409 `$ref`) ; reste lent sur Stripe, accepté comme limite connue non bloquante plutôt que résolu en profondeur.
+- **Bug de liaison parent/enfant trouvé et corrigé** (`src/ingestion/chunking/hierarchical.py`) : `parent_chunk_id` n'était en réalité jamais peuplé, sur aucun chunk, aucune source — comparaison UUID vs `str` ratée silencieusement. Trouvé en implémentant l'expansion parent explicite via Qdrant.
+- **Hallucination Rate corrigé** : le prompt système interdisait explicitement au générateur d'émettre `no_support`, figeant la métrique à 0.0 quel que soit le taux réel. Instruction retirée, métrique recalculée à partir du Faithfulness du juge indépendant : **0.375** (3/8) sur les réponses réelles, au lieu de 0.0.
+- **Citation Accuracy et Sufficiency Precision implémentées** (spec §15.3, jusque-là absentes) : voir §5.2 — 0.388 et 0.625 respectivement (n=31/50), toutes deux nettement sous leur cible (>0.90 et >0.85).
+- **Retry/backoff ajouté** sur les erreurs transitoires (recommandation 4) — pas encore ré-exécuté sur les 50 questions complètes (coût temps trop élevé dans cette session, un retry a déjà été observé réussir en conditions réelles).
+- **Algorithmes ragas maison corrigés** pour suivre fidèlement la méthode réelle de la librairie `ragas` (décomposition en claims pour Faithfulness, embeddings pour Answer Relevancy, etc.) plutôt qu'un jugement LLM holistique — décision actée de garder l'implémentation maison plutôt que la dépendance `ragas` elle-même (toujours cassée, voir §6).
+
+**Non traité dans cette session** : réponse au recommandation 3 (seuil de taille 2000 caractères) — explicitement écarté par l'utilisateur pour l'instant, coût de re-benchmarking jugé disproportionné par rapport à la priorité.
 
 ---
 

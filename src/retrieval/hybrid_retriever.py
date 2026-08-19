@@ -104,13 +104,18 @@ class HybridRetriever:
                 diff_report      – precomputed DiffReport dict, when available
                                     and intent is "comparative"
 
-        Intent-driven strategy (spec §7 "Détails Query Planner"):
+        Intent-driven strategy (déviation assumée de la spec §7 "Détails Query
+        Planner" — l'intent "navigational" et le filtre source_id automatique
+        associé ont été retirés : 0/50 questions réelles du jeu de test ne
+        déclenchaient jamais correctement "navigational", et le filtre
+        source_id qui lui était réservé s'appliquait en réalité à tous les
+        intents sans distinction, cassant le recall des questions
+        multi-sources dès qu'une seule des sources attendues était nommée
+        dans le texte — voir docs/evaluation_report.md pour la mesure) :
             factual + entity   → vector search, then post-filter on hierarchy_path
             factual, no entity → vector search only
             comparative        → vector search for context + precomputed diff JSON
                                   (via VersionDiffEngine.load_diff), if available
-            navigational       → vector search filtered by source_id (already
-                                  applied via the Qdrant filter built above)
             ambiguous          → vector search only + confidence="low" flag
         """
         t_start = time.perf_counter()
@@ -184,18 +189,31 @@ class HybridRetriever:
         elif intent == "comparative":
             # comparative → vector context stays as-is, plus a precomputed
             # deterministic diff if one is available for the versions mentioned
-            diff_report = self._load_comparative_diff(query, filters)
+            diff_report = self._load_comparative_diff(query, candidates)
             extra["diff_available"] = diff_report is not None
             if diff_report is not None:
                 extra["diff_report"] = diff_report.model_dump()
-        elif intent == "navigational":
-            # navigational → source_id filter was already applied to the Qdrant
-            # query above (via qdrant_filter); no further narrowing here.
-            pass
         elif intent == "ambiguous":
             # ambiguous → vector-only, flagged so callers can lower trust /
             # ask a clarifying question downstream.
             extra["confidence"] = "low"
+
+        # "comparative" peut vouloir dire deux choses très différentes : une
+        # vraie comparaison de versions (les questions version_conflict,
+        # "entre la version X et la version Y" — un vrai tag est alors
+        # détecté par le planner) OU une comparaison conceptuelle entre
+        # sources sans rapport avec le versioning (ex. "différence entre TLS
+        # Client Auth et l'API Stripe", classée comparative par le vocabulaire
+        # seul). Dans le second cas, le contenu jugé "identique" entre deux
+        # versions Stripe peut coïncidentiellement correspondre à la version
+        # que la question attend (ex. "legacy") sans rapport avec la question
+        # posée — dédupliquer y ferait perdre cette source sans aucune
+        # justification (régression mesurée : Recall@10 sur les questions
+        # multi_source/ambiguous, 0.6→0.2, avant ce garde-fou). Ne toucher aux
+        # candidats que quand un vrai signal de version a été détecté.
+        has_version_signal = bool(filters.get("version_tags") or filters.get("version_tag"))
+        if intent != "comparative" or has_version_signal:
+            candidates = self._dedupe_version_siblings(candidates, keep_distinct_versions=(intent == "comparative"))
 
         total_before_rerank = len(candidates)
 
@@ -301,8 +319,12 @@ class HybridRetriever:
           status keyword (active/deprecated/superseded) — never added as a
           silent default, because the current collection has status=None on
           most chunks.
-        - ``source_id`` and ``version_tag`` are added when present.
+        - ``version_tag``/``version_tags`` are added when present.
         - ``valid_from`` / ``valid_until`` are ignored if None.
+
+        Pas de filtre ``source_id`` ici : retiré (voir retrieve()) — verrouiller
+        la recherche à une seule source dès qu'elle est nommée dans le texte
+        cassait le recall des questions multi-sources.
         """
         if not filters:
             return None
@@ -323,12 +345,11 @@ class HybridRetriever:
                 {"key": "status", "match": {"value": status_val}}
             )
 
-        if filters.get("source_id"):
+        if filters.get("version_tags"):
             must_conditions.append(
-                {"key": "source_id", "match": {"value": filters["source_id"]}}
+                {"key": "version_tag", "match": {"any": filters["version_tags"]}}
             )
-
-        if filters.get("version_tag"):
+        elif filters.get("version_tag"):
             must_conditions.append(
                 {"key": "version_tag", "match": {"value": filters["version_tag"]}}
             )
@@ -387,18 +408,25 @@ class HybridRetriever:
         return out
 
     def _load_comparative_diff(
-        self, query: str, filters: Dict[str, Any]
+        self, query: str, candidates: List[Dict[str, Any]]
     ) -> Optional[DiffReport]:
         """Best-effort lookup of a precomputed diff for a comparative query.
 
         Looks for two of the planner's known version tags mentioned in the
-        query text, plus a source_id (from the planner's filters), and
-        delegates to ``VersionDiffEngine.load_diff``. Returns None — never
-        raises — when the tags/source can't be resolved or no diff has been
-        precomputed yet for that pair; callers fall back to vector-only
-        context, per spec §7.
+        query text, plus a source_id inferred from the payload of the
+        candidates actually retrieved (pas du texte de la question — le
+        filtre source_id automatique basé sur des mots-clés a été retiré, il
+        cassait le recall des questions multi-sources dès qu'une seule des
+        sources attendues était nommée dans le texte), et délègue à
+        ``VersionDiffEngine.load_diff``. Retourne None — jamais d'exception —
+        si les tags/la source ne peuvent pas être résolus ou qu'aucun diff
+        n'a été précalculé pour cette paire ; les appelants retombent sur le
+        contexte vectoriel seul, per spec §7.
         """
-        source_id = filters.get("source_id")
+        source_id = next(
+            (c.get("payload", {}).get("source_id") for c in candidates if c.get("payload", {}).get("source_id")),
+            None,
+        )
         if not source_id:
             return None
 
@@ -421,6 +449,90 @@ class HybridRetriever:
                 error=str(exc),
             )
             return None
+
+    @staticmethod
+    def _normalize_text_for_dedup(text: str) -> str:
+        """Tolère les différences d'espacement/retours à la ligne sans
+        tolérer un contenu réellement différent — même logique que
+        src/generation/citation.py::_normalize_whitespace."""
+        return " ".join((text or "").split())
+
+    @classmethod
+    def _dedupe_version_siblings(
+        cls, candidates: List[Dict[str, Any]], keep_distinct_versions: bool = False
+    ) -> List[Dict[str, Any]]:
+        """Regroupe les candidats par (source_id, hierarchy_path) au sein
+        d'une même source versionnée, puis élimine les doublons de contenu.
+
+        Cas réel constaté (mesure retrieval après le fix #8) : une source
+        versionnée dont le contenu ne change pas d'une version à l'autre pour
+        une section donnée (ex. un même endpoint identique dans 4 fichiers de
+        version Stripe) produit des embeddings quasi identiques — ces
+        doublons se marchent dessus dans le top-k au lieu de laisser la place
+        à du contenu réellement distinct, dégradant Precision/MRR/nDCG sans
+        rien apporter (c'est la même information, en double).
+
+        ``keep_distinct_versions=False`` (par défaut, questions non
+        comparatives) : ne garde que la version la plus récente de chaque
+        groupe, quel que soit son contenu — une question factuelle veut la
+        vérité actuelle, pas un mélange de versions périmées.
+
+        ``keep_distinct_versions=True`` (questions comparatives) : garde la
+        version la plus récente, puis conserve aussi toute autre version du
+        groupe dont le texte diffère réellement (comparaison possible) —
+        élimine seulement les copies au contenu identique, jamais une version
+        dont le contenu a changé. Comparer 4 copies d'un texte inchangé
+        n'apporte rien, que les 2 versions demandées soient connues ou non
+        (voir _build_qdrant_filter/version_tags pour le cas où elles le sont
+        — filtré en amont dans Qdrant, avant même d'arriver ici).
+
+        Générique : ne dépend que de métadonnées déjà posées à l'ingestion
+        (source_id, hierarchy_path, version_order — voir
+        src/dom/builders/base.py::_resolve_version) et du texte du chunk,
+        jamais d'un nom de source. Un chunk sans version_order (source non
+        versionnée) n'est jamais regroupé avec un autre — chaque tel chunk
+        reste sa propre clé unique, garantissant qu'aucun résultat non
+        versionné n'est éliminé par erreur.
+        """
+        groups: Dict[Any, List[Dict[str, Any]]] = {}
+        key_order: List[Any] = []
+        for candidate in candidates:
+            payload = candidate.get("payload", {})
+            version_order = payload.get("version_order")
+            key = (
+                (id(candidate),)
+                if version_order is None
+                else (payload.get("source_id"), payload.get("hierarchy_path"))
+            )
+            if key not in groups:
+                groups[key] = []
+                key_order.append(key)
+            groups[key].append(candidate)
+
+        result: List[Dict[str, Any]] = []
+        for key in key_order:
+            group = groups[key]
+            if len(group) == 1:
+                result.append(group[0])
+                continue
+
+            group_sorted = sorted(
+                group,
+                key=lambda c: c.get("payload", {}).get("version_order") or -1,
+                reverse=True,
+            )
+            kept = [group_sorted[0]]  # toujours la version la plus récente
+            if keep_distinct_versions:
+                kept_texts = [cls._normalize_text_for_dedup(kept[0].get("text", ""))]
+                for candidate in group_sorted[1:]:
+                    text = cls._normalize_text_for_dedup(candidate.get("text", ""))
+                    if text and text in kept_texts:
+                        continue  # contenu identique à une version déjà gardée
+                    kept.append(candidate)
+                    kept_texts.append(text)
+            result.extend(kept)
+
+        return result
 
     def _post_filter_hierarchy(
         self, candidates: List[Dict[str, Any]], entity: str
