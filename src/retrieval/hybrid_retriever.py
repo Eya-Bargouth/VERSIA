@@ -215,6 +215,8 @@ class HybridRetriever:
         if intent != "comparative" or has_version_signal:
             candidates = self._dedupe_version_siblings(candidates, keep_distinct_versions=(intent == "comparative"))
 
+        candidates = self._fetch_missing_siblings(candidates)
+
         total_before_rerank = len(candidates)
 
         # ── 7. Rerank ─────────────────────────────────────────────────
@@ -533,6 +535,73 @@ class HybridRetriever:
             result.extend(kept)
 
         return result
+
+    def _fetch_missing_siblings(self, candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Complète chaque groupe de fratrie représenté dans les candidats
+        par les membres manquants (voir src/dom/utils.py::derive_parent_path
+        et QdrantStore.get_by_parent_path).
+
+        Cas réel constaté : une liste source (ex. les paramètres d'un
+        endpoint) devient un chunk par élément à l'ingestion — le retrieval
+        par similarité classe chaque élément indépendamment, sans garantie
+        que tous les frères remontent ensemble. Mesuré : le paramètre requis
+        d'un endpoint absent du top-10 alors que des paramètres optionnels
+        du même endpoint y figuraient, faisant juger le contexte
+        "insuffisant" à tort alors que l'information existait, juste mal
+        classée.
+
+        Un appel Qdrant (scroll, pas de recherche vectorielle) par groupe de
+        fratrie distinct présent dans les candidats — pas par LLM, coût
+        négligeable comparé au reste du pipeline. Scores les chunks ajoutés
+        à 0.0 : ils n'ont pas été classés par similarité, seulement
+        complétés structurellement — le reranker les replacera à leur vraie
+        place avant la troncature finale.
+
+        Générique : ne dépend que de `parent_path` (dérivé uniquement de
+        `hierarchy_path`, propriété du chunking) et de `source_id`/
+        `version_tag` pour ne récupérer que les frères de la même version —
+        aucun nom de source ni de domaine documentaire.
+        """
+        if self.store is None:
+            return candidates
+
+        seen_ids = {str(c.get("chunk_id")) for c in candidates}
+        seen_groups: set = set()
+        extra: List[Dict[str, Any]] = []
+
+        for candidate in candidates:
+            payload = candidate.get("payload", {})
+            parent_path = payload.get("parent_path")
+            if not parent_path:
+                continue
+            source_id = payload.get("source_id")
+            version_tag = payload.get("version_tag")
+            group_key = (parent_path, source_id, version_tag)
+            if group_key in seen_groups:
+                continue
+            seen_groups.add(group_key)
+
+            try:
+                siblings = self.store.get_by_parent_path(parent_path, source_id=source_id, version_tag=version_tag)
+            except Exception as exc:
+                logger.warning("sibling_fetch_failed", parent_path=parent_path, error=str(exc))
+                continue
+
+            for sibling_payload in siblings:
+                sibling_chunk_id = sibling_payload.get("chunk_id")
+                if not sibling_chunk_id or sibling_chunk_id in seen_ids:
+                    continue
+                extra.append(
+                    {
+                        "chunk_id": sibling_chunk_id,
+                        "score": 0.0,
+                        "text": sibling_payload.get("text", ""),
+                        "payload": sibling_payload,
+                    }
+                )
+                seen_ids.add(sibling_chunk_id)
+
+        return candidates + extra
 
     def _post_filter_hierarchy(
         self, candidates: List[Dict[str, Any]], entity: str
