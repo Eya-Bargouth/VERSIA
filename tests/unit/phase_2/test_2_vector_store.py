@@ -116,3 +116,53 @@ class TestQdrantStore:
         results = store.search_dense(np.array([0.2] * 1024), k=10)
         # Même content_hash -> écrasement, pas de doublon
         assert len(results) == 1
+
+    def test_get_by_parent_path_finds_siblings_same_version_only(self):
+        """3 éléments d'une même liste source (ex. paramètres d'un endpoint,
+        hierarchy_path se terminant par [0]/[1]/[2]) dans la version v1, +
+        1 élément homonyme dans la version v2 — get_by_parent_path ne doit
+        renvoyer que les frères de la MÊME version que celle demandée."""
+        client = QdrantClient(":memory:")
+        store = QdrantStore(client=client, collection_name="test_collection")
+        store.ensure_collection()
+
+        from src.embeddings.bge_m3 import EmbeddingBatch
+
+        def _param_chunk(idx: int, version_tag: str, content_hash: str):
+            return Chunk(
+                source_id="stripe",
+                node_ids=[f"n{idx}"],
+                text=f"param {idx}",
+                raw_text=f"param {idx}",
+                contextual_prefix="",
+                version_tag=version_tag,
+                metadata=ChunkMetadata(
+                    source_type="test", source_id="stripe", node_type=NodeType.DOCUMENT,
+                    hierarchy_path=f"paths./v1/x.get.parameters[{idx}]", format_original="yaml",
+                ),
+                hierarchy_path=f"paths./v1/x.get.parameters[{idx}]",
+                content_hash=content_hash,
+            )
+
+        chunks = [
+            _param_chunk(0, "v1", "h0v1"),
+            _param_chunk(1, "v1", "h1v1"),
+            _param_chunk(2, "v1", "h2v1"),
+            _param_chunk(0, "v2", "h0v2"),
+        ]
+        emb = EmbeddingBatch(dense=np.array([[0.3] * 1024] * 4), sparse=[{1: 0.1}] * 4)
+        store.upsert(chunks, emb)
+
+        siblings = store.get_by_parent_path("paths./v1/x.get.parameters", source_id="stripe", version_tag="v1")
+        assert len(siblings) == 3
+        assert {s["hierarchy_path"] for s in siblings} == {
+            "paths./v1/x.get.parameters[0]",
+            "paths./v1/x.get.parameters[1]",
+            "paths./v1/x.get.parameters[2]",
+        }
+
+    def test_ensure_parent_path_index_is_idempotent(self):
+        client = QdrantClient(":memory:")
+        store = QdrantStore(client=client, collection_name="test_collection")
+        store.ensure_collection()
+        store.ensure_parent_path_index()  # ne doit pas lever au second appel
