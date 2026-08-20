@@ -4,7 +4,7 @@ import pytest
 from uuid import uuid4
 
 from src.dom.models import BoundingBox, DOMNode, DocumentTree, NodeType, TextStyle
-from src.dom.utils import build_hierarchy_path, get_ancestors, get_descendants, get_structural_ancestors
+from src.dom.utils import build_hierarchy_path, derive_parent_path, get_ancestors, get_descendants, get_structural_ancestors
 
 
 pytestmark = pytest.mark.phase1
@@ -125,6 +125,23 @@ class TestDOMUtils:
         path = build_hierarchy_path(tree, para.id)
         assert "Doc" in path
         assert "Sec 1" in path
+
+    def test_derive_parent_path_strips_trailing_index(self):
+        """Cas réel : 4 éléments d'une liste JSON (ex. paramètres d'un
+        endpoint) chunkés séparément doivent partager le même parent_path,
+        pour pouvoir être retrouvés ensemble (voir hybrid_retriever.py::
+        _fetch_missing_siblings)."""
+        base = "document > paths > /v1/charges/search > get > parameters"
+        assert derive_parent_path(f"{base}[0]") == base
+        assert derive_parent_path(f"{base}[1]") == base
+        assert derive_parent_path(f"{base}[12]") == base
+
+    def test_derive_parent_path_none_without_index(self):
+        assert derive_parent_path("document > paths > /v1/charges/search > get > summary") is None
+
+    def test_derive_parent_path_handles_empty(self):
+        assert derive_parent_path("") is None
+        assert derive_parent_path(None) is None
 
     def test_get_ancestors(self):
         root = DOMNode(type=NodeType.DOCUMENT, source_id="test", source_path="/test.md")
