@@ -253,3 +253,122 @@ class TestVersionSiblingDedup:
         )
 
         assert len(result["results"]) == 2
+
+
+class _FakeStoreWithSiblings:
+    """Store minimal exposant seulement get_by_parent_path, pour tester
+    _fetch_missing_siblings sans vrai Qdrant."""
+
+    def __init__(self, siblings_by_group: dict):
+        self.siblings_by_group = siblings_by_group
+        self.calls: list[tuple] = []
+
+    def get_by_parent_path(self, parent_path, source_id=None, version_tag=None, limit=50):
+        self.calls.append((parent_path, source_id, version_tag))
+        return self.siblings_by_group.get((parent_path, source_id, version_tag), [])
+
+
+class TestSiblingExpansion:
+    """Un chunk retrouvé appartenant à une liste source (parent_path défini)
+    doit se voir compléter par ses frères manquants — cas réel : le
+    paramètre requis d'un endpoint absent du top-10 alors que des paramètres
+    optionnels du même endpoint y figuraient."""
+
+    def test_missing_siblings_are_fetched_and_added(self, monkeypatch):
+        anchor = RetrievalResult(
+            chunk_id=uuid4(), score=0.8, source="dense",
+            payload={"text": "limit param", "hierarchy_path": "x.parameters[1]",
+                     "parent_path": "x.parameters", "source_id": "stripe", "version_tag": "v1"},
+        )
+        missing_sibling_payload = {
+            "chunk_id": "sib-1", "text": "query param (required)",
+            "hierarchy_path": "x.parameters[0]", "parent_path": "x.parameters",
+            "source_id": "stripe", "version_tag": "v1",
+        }
+        fake_store = _FakeStoreWithSiblings({
+            ("x.parameters", "stripe", "v1"): [missing_sibling_payload],
+        })
+        retriever = HybridRetriever(store=fake_store, use_reranker=False)
+        monkeypatch.setattr(retriever.dense_search, "search_dense", lambda *a, **k: [anchor])
+        monkeypatch.setattr(retriever.sparse_search, "search_sparse", lambda *a, **k: [])
+
+        result = retriever.retrieve(
+            "query",
+            query_embedding=np.zeros(1024, dtype=np.float32),
+            query_sparse={0: 1.0},
+            planner_output={"intent": "factual", "entity": None, "filters": {}},
+            top_k=10,
+        )
+
+        chunk_ids = {r["chunk_id"] for r in result["results"]}
+        assert "sib-1" in chunk_ids
+        assert len(result["results"]) == 2
+        added = next(r for r in result["results"] if r["chunk_id"] == "sib-1")
+        assert added["score"] == 0.0
+
+    def test_already_present_sibling_not_duplicated(self, monkeypatch):
+        chunk_id_a = str(uuid4())
+        anchor = RetrievalResult(
+            chunk_id=chunk_id_a, score=0.8, source="dense",
+            payload={"text": "a", "hierarchy_path": "x.parameters[0]",
+                     "parent_path": "x.parameters", "source_id": "stripe", "version_tag": "v1"},
+        )
+        fake_store = _FakeStoreWithSiblings({
+            ("x.parameters", "stripe", "v1"): [
+                {"chunk_id": chunk_id_a, "text": "a", "hierarchy_path": "x.parameters[0]",
+                 "parent_path": "x.parameters", "source_id": "stripe", "version_tag": "v1"},
+            ],
+        })
+        retriever = HybridRetriever(store=fake_store, use_reranker=False)
+        monkeypatch.setattr(retriever.dense_search, "search_dense", lambda *a, **k: [anchor])
+        monkeypatch.setattr(retriever.sparse_search, "search_sparse", lambda *a, **k: [])
+
+        result = retriever.retrieve(
+            "query",
+            query_embedding=np.zeros(1024, dtype=np.float32),
+            query_sparse={0: 1.0},
+            planner_output={"intent": "factual", "entity": None, "filters": {}},
+            top_k=10,
+        )
+
+        assert len(result["results"]) == 1
+
+    def test_no_parent_path_skips_lookup_entirely(self, monkeypatch):
+        anchor = RetrievalResult(
+            chunk_id=uuid4(), score=0.8, source="dense",
+            payload={"text": "a", "hierarchy_path": "x.summary", "source_id": "stripe"},
+        )
+        fake_store = _FakeStoreWithSiblings({})
+        retriever = HybridRetriever(store=fake_store, use_reranker=False)
+        monkeypatch.setattr(retriever.dense_search, "search_dense", lambda *a, **k: [anchor])
+        monkeypatch.setattr(retriever.sparse_search, "search_sparse", lambda *a, **k: [])
+
+        retriever.retrieve(
+            "query",
+            query_embedding=np.zeros(1024, dtype=np.float32),
+            query_sparse={0: 1.0},
+            planner_output={"intent": "factual", "entity": None, "filters": {}},
+            top_k=10,
+        )
+
+        assert fake_store.calls == []
+
+    def test_no_store_does_not_crash(self, monkeypatch):
+        anchor = RetrievalResult(
+            chunk_id=uuid4(), score=0.8, source="dense",
+            payload={"text": "a", "hierarchy_path": "x.parameters[0]",
+                     "parent_path": "x.parameters", "source_id": "stripe"},
+        )
+        retriever = HybridRetriever(store=None, use_reranker=False)
+        monkeypatch.setattr(retriever.dense_search, "search_dense", lambda *a, **k: [anchor])
+        monkeypatch.setattr(retriever.sparse_search, "search_sparse", lambda *a, **k: [])
+
+        result = retriever.retrieve(
+            "query",
+            query_embedding=np.zeros(1024, dtype=np.float32),
+            query_sparse={0: 1.0},
+            planner_output={"intent": "factual", "entity": None, "filters": {}},
+            top_k=10,
+        )
+
+        assert len(result["results"]) == 1
