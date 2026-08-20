@@ -11,14 +11,25 @@ from qdrant_client.models import (
     Distance,
     FieldCondition,
     Filter,
+    KeywordIndexParams,
     MatchAny,
     MatchValue,
-    NamedVector,
+    PayloadSchemaType,
     PointStruct,
     SparseVector,
     SparseVectorParams,
     VectorParams,
 )
+
+try:
+    # Retiré de qdrant-client 1.12+ (remplacé par query_points()/using=) — voir
+    # _execute_search ci-dessous, qui ne prend la branche legacy .search() que
+    # si cet import a réussi ET que le client expose encore .search().
+    from qdrant_client.models import NamedVector
+except ImportError:
+    NamedVector = None
+
+from src.dom.utils import derive_parent_path
 
 from src.ingestion.metadata import Chunk
 
@@ -57,6 +68,24 @@ class QdrantStore:
                     "sparse": SparseVectorParams(),
                 },
             )
+        self.ensure_parent_path_index()
+
+    def ensure_parent_path_index(self) -> None:
+        """Index keyword sur `parent_path` — nécessaire pour retrouver
+        efficacement les chunks frères (voir hybrid_retriever.py::
+        _fetch_missing_siblings). Idempotent : ne lève pas si l'index existe
+        déjà. Appelé séparément de la création de collection car une
+        collection déjà en place (avant l'ajout de ce mécanisme) doit
+        pouvoir recevoir l'index sans être recréée."""
+        try:
+            self.client.create_payload_index(
+                collection_name=self.collection_name,
+                field_name="parent_path",
+                field_schema=KeywordIndexParams(type=PayloadSchemaType.KEYWORD),
+            )
+            logger.info("parent_path_index_created", collection=self.collection_name)
+        except Exception as exc:
+            logger.info("parent_path_index_already_exists_or_failed", error=str(exc))
 
     def upsert(self, chunks: list[Chunk], embeddings: "EmbeddingBatch") -> None:
         """Écrit les chunks dans Qdrant de manière idempotente."""
@@ -77,6 +106,7 @@ class QdrantStore:
                 "text": chunk.text,
                 "raw_text": chunk.raw_text,
                 "hierarchy_path": chunk.hierarchy_path,
+                "parent_path": derive_parent_path(chunk.hierarchy_path),
                 "version_tag": chunk.version_tag,
                 "version_order": chunk.version_order,
                 "valid_from": chunk.valid_from.isoformat() if chunk.valid_from else None,
@@ -170,7 +200,7 @@ class QdrantStore:
 
     def _execute_search(self, query_vector, vector_name: str, filter_obj, k: int):
         """Wrapper défensif compatible search() et query_points()."""
-        if hasattr(self.client, "search"):
+        if hasattr(self.client, "search") and NamedVector is not None:
             # API standard qdrant-client 1.9–1.11
             if vector_name == "sparse":
                 return self.client.search(
@@ -221,6 +251,38 @@ class QdrantStore:
             with_payload=True,
         )
         return points[0].payload if points else None
+
+    def get_by_parent_path(
+        self, parent_path: str, source_id: str | None = None, version_tag: str | None = None, limit: int = 50
+    ) -> list[dict]:
+        """Récupère les payloads de tous les chunks partageant le même
+        `parent_path` (voir src/dom/utils.py::derive_parent_path) — les
+        éléments d'une même liste source (ex. les paramètres d'un endpoint),
+        que le retrieval par similarité n'a pas forcément tous classés dans
+        le même top-k.
+
+        `hierarchy_path` (donc `parent_path`) est une position purement
+        structurelle dans un document, identique d'une version à l'autre
+        d'une même source versionnée (ex. le même endpoint Stripe existe
+        avec le même chemin dans les 4 fichiers de version) — filtrer aussi
+        sur `source_id`/`version_tag` est nécessaire pour ne récupérer que
+        les frères de la MÊME version que le chunk d'ancrage, jamais un
+        mélange de plusieurs versions.
+
+        `limit` borne le coût : une liste source dépassant 50 éléments est
+        un cas extrême non visé ici."""
+        must = [FieldCondition(key="parent_path", match=MatchValue(value=parent_path))]
+        if source_id:
+            must.append(FieldCondition(key="source_id", match=MatchValue(value=source_id)))
+        if version_tag:
+            must.append(FieldCondition(key="version_tag", match=MatchValue(value=version_tag)))
+        points, _ = self.client.scroll(
+            collection_name=self.collection_name,
+            scroll_filter=Filter(must=must),
+            limit=limit,
+            with_payload=True,
+        )
+        return [p.payload for p in points]
 
     @staticmethod
     def _build_match(match_dict: dict) -> MatchValue | MatchAny:
