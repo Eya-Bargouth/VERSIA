@@ -1,0 +1,9 @@
+# Override de versioning pour la source "plaid" (raw/specs-api/plaid/).
+# Même principe que stripe.yaml : tri alphabétique/numérique naïf des tags
+# semver ("1.20.6" < "1.5.0-beta" alphabétiquement) donnerait un ordre faux.
+pattern: 'plaid-(?P<version>.+)\.yaml'
+order:
+  - 1.5.0-beta
+  - 1.8.1-beta
+  - 1.19.5-beta
+  - 1.20.6
