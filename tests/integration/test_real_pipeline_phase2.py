@@ -49,9 +49,9 @@ class TestRealPipeline:
         # (TRADE_TEST_SOURCE/TRADE_TEST_FILE), certaines sources sont
         # absentes de report.by_source par construction ; on ne vérifie donc
         # que celles réellement présentes dans ce run. source_id = nom du
-        # dossier (voir discover_sources) : owasp_cheatsheets, stripe,
+        # dossier (voir discover_sources) : owasp_cheatsheets, plaid,
         # binance, alpaca, regulation.
-        for source_id in ("owasp_cheatsheets", "stripe", "binance", "alpaca"):
+        for source_id in ("owasp_cheatsheets", "plaid", "binance", "alpaca"):
             if source_id in report.by_source:
                 assert report.by_source[source_id]["documents"] > 0
 
@@ -146,13 +146,17 @@ class TestRealPipeline:
         query_vector = np.random.randn(1024).astype(np.float32)
         query_vector = query_vector / np.linalg.norm(query_vector)
         
-        search_results = client.search(
+        # .search() retiré de qdrant-client 1.12+ (remplacé par
+        # query_points()/using=) — voir QdrantStore._execute_search pour le
+        # même wrapper de compatibilité côté src/.
+        search_response = client.query_points(
             collection_name=collection_name,
-            query_vector=query_vector,
+            query=query_vector,
             using="dense",
             limit=5,
             with_payload=True
         )
+        search_results = search_response.points
         
         assert len(search_results) > 0, "Recherche dense retourne zéro résultats"
         for result in search_results:
