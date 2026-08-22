@@ -42,6 +42,13 @@ class RawGenerationOutput(BaseModel):
     """Schéma exact demandé au LLM via ``LLMConfig.response_format``."""
 
     answer: str
+    # Déclaration structurelle explicite de l'abstention, distincte du texte
+    # libre de `answer` — avant ce champ, la seule façon de savoir si une
+    # réponse sans citation était une abstention légitime ("Information non
+    # trouvée...") ou une affirmation factuelle non citée était de parser le
+    # texte de `answer`, fragile et dépendant de la langue de la question
+    # (règle 2 du prompt). Voir Generator._violates_citation_rule.
+    no_answer_found: bool = False
     # max_length borne la sortie contrainte JSON (Ollama/vLLM respectent
     # maxItems du schéma) — garde-fou structurel contre une boucle de
     # répétition dégénérée du modèle (le même objet citation réémis en
