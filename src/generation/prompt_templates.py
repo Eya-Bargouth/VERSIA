@@ -16,9 +16,9 @@ from src.retrieval.context_fusion import build_labelled_contexts
 SYSTEM_PROMPT = """Tu es un assistant technique qui répond exclusivement à partir du contexte documentaire fourni par l'utilisateur.
 
 Règles strictes :
-1. N'utilise jamais de connaissances en dehors du contexte fourni. Si le contexte ne permet pas de répondre complètement, dis-le explicitement dans `answer` (ex. "Information non trouvée dans la documentation.") plutôt que de deviner.
+1. N'utilise jamais de connaissances en dehors du contexte fourni. Si le contexte ne permet pas de répondre complètement, mets `no_answer_found` à `true` et dis-le explicitement dans `answer` (ex. "Information non trouvée dans la documentation.") plutôt que de deviner. Si tu réponds effectivement à partir du contexte, `no_answer_found` doit être `false` ET `answer` doit contenir la phrase de réponse complète en langage naturel — ne laisse jamais `answer` vide sous prétexte que l'information figure déjà dans `citations` ; `citations` ne remplace jamais `answer`, il le complète.
 2. Réponds dans la même langue que la question.
-3. Pour chaque affirmation factuelle importante de ta réponse, ajoute une citation dans `citations` :
+3. Si `no_answer_found` est `false`, pour chaque affirmation factuelle importante de ta réponse, ajoute une citation dans `citations` (une réponse non-abstentive sans aucune citation est un manquement à cette règle) :
    - `claim` : l'affirmation précise de `answer` (une phrase ou fragment de phrase, copié ou reformulé fidèlement depuis `answer`) que cette citation appuie — PAS toute la réponse, une seule affirmation ciblée.
    - `chunk_id` : copié EXACTEMENT depuis le marqueur [chunk_id] du chunk source dans le contexte (ne l'invente jamais, ne le modifie jamais).
    - `text_span` : le fragment MINIMAL du chunk qui affirme DIRECTEMENT le fait cité — jamais un passage voisin, une liste de valeurs associées (ex. une énumération de types/intervalles) ou une description générale du champ. S'il faut citer un nom de paramètre ET dire qu'il est requis, le fragment doit contenir les deux, pas juste l'un ou l'autre.
@@ -28,6 +28,20 @@ Règles strictes :
    - `sufficiency_score` : dans quelle mesure le contexte fourni contient assez d'information pour répondre complètement et exactement à la question (0.0 = pas du tout, 1.0 = totalement).
 5. Si un rapport de changements entre versions ("Différences détectées") est fourni, utilise-le pour signaler explicitement toute différence de comportement entre les versions plutôt que de donner une seule réponse figée.
 6. Réponds uniquement avec le JSON demandé par le schéma — aucun texte avant ou après."""
+
+# Relance envoyée par Generator._retry_for_output_contract quand une
+# réponse non-abstentive viole le contrat de sortie — voir audit
+# génération, fix 3 : rend la règle contraignante plutôt que purement
+# déclarative dans le system prompt. Couvre deux symptômes mesurés en
+# conditions réelles : `citations` vide malgré une affirmation factuelle
+# (règle 3), et `answer` vide malgré des `citations` présentes (le modèle
+# extrait la bonne citation mais échoue à synthétiser la phrase de
+# réponse — 69% d'un échantillon réel sur qwen2.5:3b-instruct).
+CITATION_RETRY_MESSAGE = """Ta réponse précédente est incomplète par rapport au schéma attendu (`no_answer_found: false`) :
+- Si `answer` est vide alors que `citations` contient déjà la bonne information, rédige la phrase de réponse dans `answer` à partir de ce que tes citations affirment — ne laisse jamais `answer` vide quand tu as l'information.
+- Si `citations` est vide alors que `answer` affirme un fait, cite le(s) chunk_id exact(s) du contexte dans `citations`, en violation sinon de la règle 3.
+- Si en réalité le contexte ne permet pas de répondre, corrige `answer` pour le dire explicitement et mets `no_answer_found` à `true`.
+Réponds uniquement avec le JSON complet demandé par le schéma."""
 
 
 def build_user_message(
