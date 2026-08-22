@@ -40,13 +40,21 @@ def get_nodes_by_type(tree: DocumentTree, node_type: NodeType) -> list[DOMNode]:
 
 
 def build_hierarchy_path(tree: DocumentTree, node_id) -> str:
-    """Construit le fil d'Ariane : 'Document > Section 2 > Subsection 2.1'."""
+    """Construit le fil d'Ariane : 'Document > Section 2 > Subsection 2.1'.
+
+    Non tronqué : cette valeur sert de clé d'identité (`derive_parent_path`,
+    dédup par version dans `HybridRetriever._dedupe_version_siblings`) — une
+    troncature par segment coupait silencieusement le suffixe `[N]` des
+    chemins longs, rendant des éléments de liste distincts indiscernables
+    entre eux (paramètres d'un même endpoint fusionnés à tort). Un usage
+    d'affichage tronqué existe séparément (voir
+    `HierarchicalChunker._generate_contextual_prefix`), jamais réutilisé ici."""
     path = tree.get_path(node_id)
     parts = []
     for node in path:
         if node.type in (NodeType.DOCUMENT, NodeType.SECTION, NodeType.SUBSECTION, NodeType.HEADING):
             title = node.metadata.get("title") or node.text or node.markdown or node.type.value
-            parts.append(title.strip()[:60])
+            parts.append(title.strip())
     return " > ".join(parts) if parts else "Document"
 
 
