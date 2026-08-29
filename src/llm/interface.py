@@ -59,6 +59,29 @@ class LLMConfig(BaseModel):
     repeat_penalty: float | None = None
 
 
+def normalize_llm_scale(value):
+    """Ramène une valeur numérique auto-évaluée par un LLM (confidence,
+    sufficiency_score, ...) sur l'échelle 0.0-1.0 attendue partout dans le
+    code (RawGenerationOutput, _RawSufficiencyOutput), même quand le modèle
+    répond sur une échelle 0-100 malgré la consigne explicite du prompt.
+
+    Mesuré en conditions réelles avec qwen2.5:3b-instruct : confidence=100
+    et sufficiency_score=97 renvoyés malgré un prompt disant explicitement
+    "jamais un pourcentage" — la consigne de prompt seule ne suffit pas à
+    garantir le respect de l'échelle. Sans cette normalisation, Pydantic
+    rejette la valeur (`le=1.0`) et la réponse entière est jetée par
+    l'appelant (voir Generator._parse / SufficiencyChecker._check_llm),
+    perdant une réponse par ailleurs valide pour un seul champ mal calibré.
+
+    Ne couvre que le cas mesuré (échelle 0-100) : une valeur > 1 et <= 100
+    est divisée par 100 ; au-delà, elle est plafonnée à 1.0 plutôt que
+    rejetée — une valeur non numérique est retournée telle quelle pour que
+    la validation Pydantic normale produise son erreur habituelle."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 1:
+        return min(value / 100, 1.0) if value <= 100 else 1.0
+    return value
+
+
 class BaseLLMClient(ABC):
     """Client LLM abstrait — toutes les implémentations doivent hériter de cette classe."""
 
