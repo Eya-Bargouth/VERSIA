@@ -17,7 +17,12 @@ dependencies = [
     "structlog>=24.1.0",
     "PyYAML>=6.0.1",
     "markdown-it-py>=3.0.0",
-    "transformers>=4.41.0",
+    # <5.0.0 : FlagEmbedding 1.4.0 (BGE-M3/reranker) importe TrainingArguments
+    # depuis l'API transformers 4.x, absente/déplacée dans la 5.x — sans ce
+    # plafond, l'installation de l'image Docker (aucune version pinnée
+    # jusqu'ici, voir "vérification Phase 6") résout la dernière transformers
+    # publiée et casse le chargement des deux modèles au runtime.
+    "transformers>=4.41.0,<5.0.0",
     "torch>=2.3.0",
     "sentence-transformers>=3.0.0",
     "pytest>=8.2.0",
