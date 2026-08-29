@@ -3,7 +3,9 @@
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from src.llm.interface import normalize_llm_scale
 
 
 class Citation(BaseModel):
@@ -58,6 +60,11 @@ class RawGenerationOutput(BaseModel):
     citations: list[RawCitation] = Field(default_factory=list, max_length=15)
     confidence: float = Field(ge=0.0, le=1.0)
     sufficiency_score: float = Field(ge=0.0, le=1.0)
+
+    @field_validator("confidence", "sufficiency_score", mode="before")
+    @classmethod
+    def _normalize_scale(cls, v):
+        return normalize_llm_scale(v)
 
 
 class GenerationResult(BaseModel):
