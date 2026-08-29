@@ -1,13 +1,19 @@
 """Application FastAPI (spec §10)."""
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import structlog
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from src.api.dependencies import build_pipeline
+from src.api.routes.health import router as health_router
+from src.api.routes.ingest import router as ingest_router
 from src.api.routes.query import router as query_router
 from src.config.settings import get_settings
+
+_STATIC_DIR = Path(__file__).parent / "static"
 
 logger = structlog.get_logger(__name__)
 
@@ -19,23 +25,18 @@ async def lifespan(app: FastAPI):
     # Construit une seule fois tous les composants coûteux (BGE-M3, reranker,
     # connexions Qdrant/Ollama) — jamais reconstruits à chaque requête.
     app.state.pipeline = build_pipeline()
+    # Store de jobs /ingest en mémoire — voir src/api/routes/ingest.py.
+    app.state.jobs = {}
     yield
     logger.info("api_shutdown")
 
 
 app = FastAPI(title="TRADE API", version="2.1.0", lifespan=lifespan)
 app.include_router(query_router)
-
-
-@app.get("/health")
-async def health():
-    settings = get_settings()
-    services = {
-        "qdrant": "unknown",
-        "llm": "unknown",
-    }
-    return {
-        "status": "healthy",
-        "services": services,
-        "version": "2.1.0",
-    }
+app.include_router(health_router)
+app.include_router(ingest_router)
+# Interface de vérification manuelle des fonctionnalités (hors périmètre de
+# la spec v2.1, ajout demandé séparément). Montée sous /ui, pas /, pour ne
+# jamais entrer en conflit avec les routes API existantes (/query, /health,
+# /ingest).
+app.mount("/ui", StaticFiles(directory=str(_STATIC_DIR), html=True), name="ui")
