@@ -25,6 +25,17 @@ class Settings(BaseSettings):
     qdrant_port: int = 6333
     qdrant_collection_name: str = "trade_chunks"
 
+    # Redis — cache des réponses POST /query (hors périmètre spec v2.1,
+    # ajout demandé séparément, voir src/api/cache.py). Un cache manqué ou
+    # Redis injoignable ne doit jamais faire échouer une requête : dégrade
+    # silencieusement vers une génération normale.
+    redis_host: str = "localhost"
+    redis_port: int = 6379
+    # None = pas d'expiration — l'invalidation principale est l'appel
+    # explicite à clear() après une ré-ingestion réussie (voir
+    # src/api/routes/ingest.py).
+    redis_cache_ttl_seconds: int | None = None
+
     # LLM
     llm_provider: Literal["ollama", "vllm"] = "ollama"
     llm_model: str = "qwen2.5:3b-instruct"
