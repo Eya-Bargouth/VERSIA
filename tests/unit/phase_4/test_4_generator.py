@@ -237,7 +237,10 @@ class TestGenerator:
         assert result.answer == "symbol is required"
         assert len(result.citations) == 1
 
-    def test_empty_answer_despite_citations_degrades_after_failed_retry(self, sample_chunk):
+    def test_empty_answer_despite_citations_degrades_and_synthesizes_after_failed_retry(self, sample_chunk):
+        """Si la relance ne fait pas remplir `answer` par le modèle, l'utilisateur
+        doit quand même voir une réponse plutôt qu'une chaîne vide : synthèse
+        déterministe depuis les `claim`, confidence toujours dégradée."""
         chunk_id, chunk = sample_chunk
         content = (
             '{"answer": "", "no_answer_found": false, '
@@ -250,7 +253,8 @@ class TestGenerator:
         result = gen.generate("What parameter is required?", [chunk])
 
         assert len(client.calls) == 2
-        assert result.answer == ""
+        assert result.answer != ""
+        assert "symbol is required" in result.answer
         assert result.confidence == 0.3
 
     def test_whitespace_only_answer_counts_as_empty(self, sample_chunk):
