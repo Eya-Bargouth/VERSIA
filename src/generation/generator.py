@@ -9,7 +9,7 @@ from pydantic import ValidationError
 
 from src.generation.citation import enrich_citations
 from src.generation.prompt_templates import CITATION_RETRY_MESSAGE, SYSTEM_PROMPT, build_user_message
-from src.generation.schemas import GenerationResult, RawGenerationOutput
+from src.generation.schemas import GenerationResult, RawCitation, RawGenerationOutput
 from src.llm.interface import BaseLLMClient, LLMConfig, LLMMessage
 
 logger = structlog.get_logger(__name__)
@@ -103,9 +103,37 @@ class Generator:
                 answer=retried.answer[:200],
                 n_citations=len(retried.citations),
             )
-            retried = retried.model_copy(update={"confidence": min(retried.confidence, 0.3)})
+            update = {"confidence": min(retried.confidence, 0.3)}
+            # `answer` vide malgré des citations valides persistant après
+            # relance (mesuré en conditions réelles sur qwen2.5:3b-instruct :
+            # la relance ne corrige jamais ce cas précis) : synthèse
+            # déterministe depuis les `claim` plutôt que de renvoyer une
+            # chaîne vide à l'utilisateur final quand l'information est déjà
+            # là. La confidence plafonnée ci-dessus reste le signal de
+            # dégradation pour AbstentionGate ; ceci garantit seulement
+            # qu'une réponse existe quand l'information est déjà identifiée.
+            if not retried.answer.strip() and retried.citations:
+                update["answer"] = self._synthesize_answer_from_citations(retried.citations)
+            retried = retried.model_copy(update=update)
 
         return retried
+
+    @staticmethod
+    def _synthesize_answer_from_citations(citations: list[RawCitation]) -> str:
+        """Reconstruit un texte de réponse minimal à partir des `claim` des
+        citations — filet de sécurité déterministe, pas une synthèse LLM.
+        Dédoublonne (le modèle répète parfois le même claim sur plusieurs
+        citations, observé en conditions réelles)."""
+        seen: set[str] = set()
+        unique_claims = []
+        for c in citations:
+            claim = (c.claim or "").strip()
+            if claim and claim not in seen:
+                seen.add(claim)
+                unique_claims.append(claim)
+        if not unique_claims:
+            return ""
+        return "(Réponse reconstruite automatiquement depuis les citations — non synthétisée par le modèle, à vérifier) " + " ".join(unique_claims)
 
     @staticmethod
     def _parse(content: str) -> tuple[RawGenerationOutput, bool]:
