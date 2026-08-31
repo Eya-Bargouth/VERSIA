@@ -15,7 +15,8 @@ from pathlib import Path
 import structlog
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 
-from src.api.dependencies import get_pipeline
+from src.api.cache import QueryCache
+from src.api.dependencies import get_cache, get_pipeline
 from src.api.schemas import IngestJobStatus, IngestRequest, IngestResponse
 from src.ingestion.pipeline import run_ingestion
 from src.pipeline import QueryPipeline
@@ -25,7 +26,7 @@ router = APIRouter()
 
 
 def _run_job(
-    jobs: dict, job_id: str, pipeline: QueryPipeline, raw_dir: Path, versioning_dir: Path | None
+    jobs: dict, job_id: str, pipeline: QueryPipeline, cache: QueryCache, raw_dir: Path, versioning_dir: Path | None
 ) -> None:
     jobs[job_id]["status"] = "running"
     try:
@@ -37,6 +38,9 @@ def _run_job(
         )
         jobs[job_id]["status"] = "done"
         jobs[job_id]["report"] = report.model_dump()
+        # Les réponses en cache peuvent référencer des chunks désormais
+        # modifiés/supprimés par cette ré-ingestion.
+        cache.clear()
     except Exception as exc:
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["error"] = str(exc)
@@ -49,6 +53,7 @@ def ingest(
     background_tasks: BackgroundTasks,
     request: Request,
     pipeline: QueryPipeline = Depends(get_pipeline),
+    cache: QueryCache = Depends(get_cache),
 ) -> IngestResponse:
     job_id = str(uuid.uuid4())
     request.app.state.jobs[job_id] = {"status": "queued"}
@@ -57,6 +62,7 @@ def ingest(
         request.app.state.jobs,
         job_id,
         pipeline,
+        cache,
         Path(payload.raw_dir),
         Path(payload.versioning_dir) if payload.versioning_dir else None,
     )
