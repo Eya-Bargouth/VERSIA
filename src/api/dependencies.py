@@ -13,6 +13,7 @@ from pathlib import Path
 from fastapi import Request
 from qdrant_client import QdrantClient
 
+from src.api.cache import QueryCache
 from src.config.settings import get_settings
 from src.embeddings.bge_m3 import BGEEmbedder
 from src.embeddings.vector_store import QdrantStore
@@ -79,3 +80,14 @@ def get_pipeline(request: Request) -> QueryPipeline:
     (app.state.pipeline, voir lifespan dans main.py), jamais reconstruit
     par requête."""
     return request.app.state.pipeline
+
+
+def build_cache() -> QueryCache:
+    settings = get_settings()
+    return QueryCache(host=settings.redis_host, port=settings.redis_port, ttl_seconds=settings.redis_cache_ttl_seconds)
+
+
+def get_cache(request: Request) -> QueryCache:
+    """Dépendance FastAPI — lit le cache construit au démarrage
+    (app.state.cache, voir lifespan dans main.py)."""
+    return request.app.state.cache
