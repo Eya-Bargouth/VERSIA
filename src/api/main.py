@@ -7,7 +7,7 @@ import structlog
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from src.api.dependencies import build_pipeline
+from src.api.dependencies import build_cache, build_pipeline
 from src.api.routes.health import router as health_router
 from src.api.routes.ingest import router as ingest_router
 from src.api.routes.query import router as query_router
@@ -27,6 +27,9 @@ async def lifespan(app: FastAPI):
     app.state.pipeline = build_pipeline()
     # Store de jobs /ingest en mémoire — voir src/api/routes/ingest.py.
     app.state.jobs = {}
+    # Cache Redis des réponses /query (hors périmètre spec v2.1, voir
+    # src/api/cache.py) — dégrade silencieusement si Redis est injoignable.
+    app.state.cache = build_cache()
     yield
     logger.info("api_shutdown")
 
