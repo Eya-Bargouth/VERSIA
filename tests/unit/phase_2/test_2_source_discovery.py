@@ -73,7 +73,7 @@ class TestSourceDiscovery:
 
     def test_real_raw_dir_and_versioning_dir_discover_five_sources(self, project_root):
         """Contre le vrai corpus du projet : 5 sources attendues, seule
-        "stripe" versionnée (voir tests/fixtures/versioning/stripe.yaml)."""
+        "plaid" versionnée (voir tests/fixtures/versioning/plaid.yaml)."""
         raw_dir = project_root / "raw"
         versioning_dir = project_root / "tests" / "fixtures" / "versioning"
         if not raw_dir.exists():
@@ -81,11 +81,11 @@ class TestSourceDiscovery:
 
         sources = discover_sources(raw_dir, versioning_dir=versioning_dir)
         source_ids = {s.source_id for s in sources}
-        assert {"stripe", "binance", "owasp_cheatsheets", "regulation", "alpaca"} <= source_ids
+        assert {"plaid", "binance", "owasp_cheatsheets", "regulation", "alpaca"} <= source_ids
 
-        stripe = next(s for s in sources if s.source_id == "stripe")
-        assert stripe.version_pattern is not None
-        assert stripe.version_order == ["legacy", "v2213", "v2293", "v2323"]
+        plaid = next(s for s in sources if s.source_id == "plaid")
+        assert plaid.version_pattern is not None
+        assert plaid.version_order == ["1.5.0-beta", "1.8.1-beta", "1.19.5-beta", "1.20.6"]
 
     def test_unsupported_files_excluded_and_logged(self, tmp_path, monkeypatch):
         """Un fichier de format non supporté (aucun builder ne le prend en
