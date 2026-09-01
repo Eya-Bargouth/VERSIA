@@ -71,8 +71,9 @@ class QueryPipeline:
         chunks = retrieval["results"]
 
         diff_explanation = self._diff_explanation(retrieval)
+        generation_chunks = self._narrow_chunks_for_generation(chunks, retrieval)
         sufficiency = self.sufficiency_checker.check(question, chunks, self.llm_config, diff_explanation=diff_explanation)
-        generation = self.generator.generate(question, chunks, diff_explanation=diff_explanation)
+        generation = self.generator.generate(question, generation_chunks, diff_explanation=diff_explanation)
         conflicts = self._detect_conflicts(chunks, sufficiency, retrieval)
 
         reranker_scores = [c.get("rerank_score", c.get("score", 0.0)) for c in chunks]
@@ -108,35 +109,88 @@ class QueryPipeline:
         )
 
     @staticmethod
+    def _target_hierarchy_paths(retrieval: dict) -> set[str]:
+        """hierarchy_path à considérer comme pertinents pour la question
+        comparative posée — utilisé à la fois pour filtrer le
+        diff_explanation transmis au générateur et pour restreindre
+        l'explication affichée par le detecteur de conflit structurel (même
+        source de vérité, pour ne jamais montrer deux versions différentes
+        du "changement pertinent" au générateur et à l'UI).
+
+        Priorité au(x) nœud(s) Change trouvé(s) par recherche sémantique
+        (retrieval["change_nodes"], classés par pertinence — voir
+        HybridRetriever._search_relevant_changes) : ne garder QUE le meilleur
+        hit restreint au seul changement demandé, plutôt que "tout
+        changement dont le hierarchy_path correspond à N'IMPORTE LEQUEL des
+        10 chunks retrouvés" (repli ci-dessous) — cette dernière version
+        laissait passer plusieurs endpoints sans rapport partageant un nom
+        de champ (ex. "consent_expiration_time" apparaît dans une dizaine de
+        schémas Plaid distincts), mesurée comme cause de dérive du
+        générateur vers des endpoints non demandés.
+
+        Repli sur les hierarchy_path des chunks retrouvés si aucun nœud
+        Change n'a été trouvé (index absent pour cette source, ou aucun
+        changement substantiel indexé) — dégrade gracieusement plutôt que de
+        ne rien filtrer du tout."""
+        change_nodes = retrieval.get("change_nodes")
+        if change_nodes:
+            return {change_nodes[0].get("hierarchy_path")}
+        return {
+            path
+            for c in retrieval.get("results", [])
+            if (path := c.get("payload", {}).get("hierarchy_path"))
+        }
+
+    @staticmethod
+    def _narrow_chunks_for_generation(chunks: list[dict], retrieval: dict) -> list[dict]:
+        """Pour les questions comparatives, restreint le contexte transmis au
+        générateur (pas au sufficiency checker, ni à la détection de
+        conflit, qui continuent de recevoir le pool complet) aux seuls
+        chunks du hierarchy_path ciblé (voir _target_hierarchy_paths),
+        plutôt que le top-10 mélangé (contenu du changement demandé + N
+        endpoints sans rapport partageant un score de similarité proche).
+
+        Mesuré en conditions réelles (qwen2.5:3b ET gemma3:4b, priorités 1 et
+        2 déjà en place) : diff_explanation est bien resserré sur le seul
+        changement demandé, mais le générateur reçoit quand même les 10
+        chunks du pool et part décrire plusieurs endpoints non demandés —
+        réponse verbeuse qui épuise le budget de génération avant de clore
+        le JSON (EOF juste après "sufficiency_score":, sans valeur). Ce
+        resserrement cible directement cette dérive, à la source.
+
+        Repli sur le pool complet si le filtre ne garde aucun chunk (ex.
+        target_paths issu du fallback "tous les chunks retrouvés" alors
+        qu'aucun ne matche réellement, cas qui ne devrait pas arriver mais
+        mieux vaut risquer le pool complet qu'un contexte vide)."""
+        if not retrieval.get("diff_report"):
+            return chunks
+        target_paths = QueryPipeline._target_hierarchy_paths(retrieval)
+        narrowed = [c for c in chunks if c.get("payload", {}).get("hierarchy_path") in target_paths]
+        return narrowed or chunks
+
+    @staticmethod
     def _diff_explanation(retrieval: dict) -> str | None:
         """Reconstruit le texte de diff pour les questions comparatives, à
         partir du DiffReport (sérialisé en dict) déjà chargé par
         HybridRetriever — pas de nouvel accès disque ici.
 
-        Filtre aux changements pertinents pour les chunks effectivement
-        retrouvés : un DiffReport couvre TOUT le document (ex. 909
-        changements pour Plaid 1.19.5-beta->1.20.6), et injecter la totalité
-        dans le prompt noie le changement réellement demandé sous des
-        centaines de lignes sans rapport — mesuré en conditions réelles :
-        hallucinations (contenu inventé absent du contexte) et verdicts
-        sufficiency erratiques (même question : "partial" puis "insufficient"
-        selon les runs, le LLM ne "retrouvant" la bonne ligne qu'au hasard
-        dans un texte massif). change.key suit le format
-        "{hierarchy_path}|{type}#{ordinal}" (voir
+        Filtre aux changements réellement pertinents pour la question posée
+        (voir _target_hierarchy_paths) : un DiffReport couvre TOUT le
+        document (ex. 909 changements pour Plaid 1.19.5-beta->1.20.6), et
+        injecter la totalité dans le prompt noie le changement réellement
+        demandé sous des centaines de lignes sans rapport — mesuré en
+        conditions réelles : hallucinations (contenu inventé absent du
+        contexte) et verdicts sufficiency erratiques. change.key suit le
+        format "{hierarchy_path}|{type}#{ordinal}" (voir
         src/ingestion/version_diff.py::_generic_key) — même hierarchy_path
-        que celui déjà exposé dans le payload des chunks retrouvés, donc pas
-        de couplage à un format de source particulier."""
+        que celui déjà exposé dans le payload des chunks/nœuds Change, donc
+        pas de couplage à un format de source particulier."""
         diff_report = retrieval.get("diff_report")
         if not diff_report:
             return None
         changes = [Change(**c) for c in diff_report["changes"]]
-
-        retrieved_paths = {
-            path
-            for c in retrieval.get("results", [])
-            if (path := c.get("payload", {}).get("hierarchy_path"))
-        }
-        changes = [c for c in changes if c.key.rsplit("|", 1)[0] in retrieved_paths]
+        target_paths = QueryPipeline._target_hierarchy_paths(retrieval)
+        changes = [c for c in changes if c.key.rsplit("|", 1)[0] in target_paths]
 
         return summarize_changes(changes, diff_report["version_from"], diff_report["version_to"])
 
@@ -162,8 +216,15 @@ class QueryPipeline:
 
         diff_report = retrieval.get("diff_report")
         if diff_report and self.conflict_detector is not None:
+            # Même filtre que _diff_explanation (voir _target_hierarchy_paths)
+            # — sans ça, `explanation` dumpait TOUS les changements du diff
+            # (ex. 909 pour Plaid) dans l'UI, noyant le seul changement
+            # pertinent sous des centaines sans rapport.
             structural = self.conflict_detector.detect_structural(
-                diff_report["source_id"], diff_report["version_from"], diff_report["version_to"]
+                diff_report["source_id"],
+                diff_report["version_from"],
+                diff_report["version_to"],
+                hierarchy_paths=self._target_hierarchy_paths(retrieval),
             )
             if structural.conflict:
                 reports.append(structural)
