@@ -24,6 +24,7 @@ Usage : --limit N pour un run partiel (smoke test avant le run complet).
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -88,6 +89,10 @@ def build_components():
         max_tokens=settings.llm_max_tokens,
         timeout=settings.llm_timeout,
         repeat_penalty=settings.llm_repeat_penalty,
+        # Opt-in via env var, jamais actif par défaut : sert uniquement à
+        # comparer un modèle générateur candidat sur CPU (ex. gemma3:4b) sans
+        # contention GPU avec BGE-M3/reranker, pour un test ponctuel.
+        num_gpu=int(os.environ["GEN_NUM_GPU"]) if "GEN_NUM_GPU" in os.environ else None,
     )
     judge_config = LLMConfig(
         provider="ollama",
@@ -157,22 +162,24 @@ def run_one_question(components: dict, q: dict) -> dict:
     )
     generation = components["generator"].generate(q["question"], chunks, diff_explanation=diff_explanation)
 
+    # Ce script réimplémente sa propre chaîne retrieve->sufficiency->generate->
+    # conflict (pour capturer séparément la génération brute et finale depuis
+    # un seul passage, voir docstring du module) plutôt que de réutiliser
+    # QueryPipeline._detect_conflicts() — reçoit donc le même fix séparément
+    # (audit #12) : detect_structural (gratuit, déterministe, simple lecture
+    # d'un diff précalculé) ne dépend plus du seuil de suffisance, qui ne gate
+    # plus que detect_textual (coûteux, LLM).
     conflicts = []
+    diff_report = retrieval.get("diff_report")
+    if diff_report:
+        structural = components["conflict_detector"].detect_structural(
+            diff_report["source_id"], diff_report["version_from"], diff_report["version_to"]
+        )
+        if structural.conflict:
+            conflicts.append(structural)
+
     if sufficiency.verdict != "insufficient" and sufficiency.confidence >= CONFLICT_SUFFICIENCY_THRESHOLD:
-        conflicts = list(components["conflict_detector"].detect_textual(chunks, gen_config))
-        # Ce script réimplémente sa propre chaîne retrieve->sufficiency->
-        # generate->conflict (pour capturer séparément la génération brute et
-        # finale depuis un seul passage, voir docstring du module) plutôt que
-        # de réutiliser QueryPipeline._detect_conflicts() — doit donc recevoir
-        # le même fix (audit #12) séparément, sinon les conflits structurels
-        # restent invisibles ici même une fois QueryPipeline corrigé.
-        diff_report = retrieval.get("diff_report")
-        if diff_report:
-            structural = components["conflict_detector"].detect_structural(
-                diff_report["source_id"], diff_report["version_from"], diff_report["version_to"]
-            )
-            if structural.conflict:
-                conflicts.append(structural)
+        conflicts.extend(components["conflict_detector"].detect_textual(chunks, gen_config))
 
     reranker_scores = [c.get("rerank_score", c.get("score", 0.0)) for c in chunks]
     decision = components["abstention_gate"].evaluate(
@@ -204,7 +211,22 @@ def run_one_question(components: dict, q: dict) -> dict:
     ctx_precision = ragas_eval.context_precision(judge_client, judge_config, q["question"], chunk_texts, precision_answer)
     ctx_recall = None
     if q.get("expected_answer"):
-        ctx_recall = ragas_eval.context_recall(judge_client, judge_config, q["expected_answer"], context_text).score
+        recall_config = judge_config
+        if q.get("category") == "version_conflict":
+            # expected_answer embarque deux blocs JSON complets pour cette
+            # catégorie (voir generate_eval_questions_templated.py::
+            # collect_version_conflict_questions) — le budget 1024 tokens du
+            # juge (choisi pour les catégories courtes, voir
+            # build_components) tronque régulièrement CETTE classification
+            # précise (mesuré : "EOF while parsing a string"). Bump limité au
+            # seul appel context_recall — un essai précédent l'appliquait à
+            # judge_config dans son ensemble, doublant le budget des ~15
+            # appels juge de la question (faithfulness/relevancy/
+            # context_precision x10 chunks/citation_accuracy) et reproduisant
+            # le facteur ~70 CPU documenté plus haut, jusqu'à provoquer des
+            # timeouts Ollama en cascade (mesuré en conditions réelles).
+            recall_config = judge_config.model_copy(update={"max_tokens": 2048})
+        ctx_recall = ragas_eval.context_recall(judge_client, recall_config, q["expected_answer"], context_text).score
     cit_accuracy = citation_accuracy(judge_client, judge_config, generation.answer, generation.citations)
 
     return {
