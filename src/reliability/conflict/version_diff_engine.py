@@ -32,14 +32,26 @@ class VersionDiffConflictDetector:
         version_from: str,
         version_to: str,
         key: str | None = None,
+        hierarchy_paths: set[str] | None = None,
     ) -> ConflictReport:
         """Charge le diff précalculé (source_id, version_from, version_to) et
         le convertit en ConflictReport.
 
         Args:
-            key: clé sémantique optionnelle (ex. "POST:/v1/orders") pour ne
-                considérer que les changements touchant cet endpoint/paramètre
-                précis. Sans `key`, agrège tous les changements du diff.
+            key: clé sémantique exacte optionnelle (ex. "POST:/v1/orders")
+                pour ne considérer que les changements touchant cet
+                endpoint/paramètre précis.
+            hierarchy_paths: ensemble optionnel de hierarchy_path (préfixe de
+                `change.key` avant le "|{type}#{ordinal}" — voir
+                src/ingestion/version_diff.py::_generic_key) pour restreindre
+                aux changements concernant un contenu effectivement pertinent
+                pour la question (ex. les chunks retrouvés par le retrieval,
+                ou les nœuds Change trouvés par recherche sémantique — voir
+                src/pipeline.py::_detect_conflicts). Sans `key` ni
+                `hierarchy_paths`, agrège tous les changements du diff — ce
+                qui produisait un `explanation` dumpant des centaines de
+                changements sans rapport dans l'UI (mesuré en conditions
+                réelles), d'où l'ajout de ce filtre.
 
         Note: `ConflictReport.chunks` reste vide ici — le diff opère sur des
         clés sémantiques du DOM (avant chunking), pas sur des chunk_id Qdrant ;
@@ -58,6 +70,8 @@ class VersionDiffConflictDetector:
         changes = report.changes
         if key is not None:
             changes = [c for c in changes if c.key == key]
+        if hierarchy_paths is not None:
+            changes = [c for c in changes if c.key.rsplit("|", 1)[0] in hierarchy_paths]
 
         if not changes:
             return ConflictReport(conflict=False, method="version_diff")
