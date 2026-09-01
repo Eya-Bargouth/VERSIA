@@ -37,9 +37,17 @@ class Generator:
             LLMMessage(role="system", content=SYSTEM_PROMPT),
             LLMMessage(role="user", content=user_message),
         ]
-        config = self.llm_config.model_copy(
-            update={"response_format": RawGenerationOutput.model_json_schema()}
-        )
+        # Température=0 pour diff_explanation testée puis abandonnée : à
+        # température nulle, une sortie JSON cassée (troncature sur un
+        # backtick lors de la citation d'un terme technique — voir audit
+        # génération) se reproduit à l'identique à chaque nouvelle tentative
+        # (vérifié : reproduction octet pour octet sur 2 relances), annulant
+        # tout bénéfice du mécanisme de retry existant (qui redemande une
+        # génération complète — voir run_one_question_with_retry). La
+        # température par défaut du projet laisse au moins une chance réelle
+        # qu'une relance tire un échantillonnage différent.
+        config_update = {"response_format": RawGenerationOutput.model_json_schema()}
+        config = self.llm_config.model_copy(update=config_update)
 
         response = self.llm_client.complete(messages, config)
         raw, parsed_ok = self._parse(response.content)
