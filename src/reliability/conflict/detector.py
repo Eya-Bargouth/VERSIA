@@ -31,9 +31,14 @@ class ConflictDetector:
         self.llm_fallback_detector = LLMFallbackDetector(llm_client) if llm_client else None
 
     def detect_structural(
-        self, source_id: str, version_from: str, version_to: str, key: str | None = None
+        self,
+        source_id: str,
+        version_from: str,
+        version_to: str,
+        key: str | None = None,
+        hierarchy_paths: set[str] | None = None,
     ) -> ConflictReport:
-        return self.version_diff_detector.detect(source_id, version_from, version_to, key)
+        return self.version_diff_detector.detect(source_id, version_from, version_to, key, hierarchy_paths)
 
     def detect_textual(self, chunks: list[dict], config: LLMConfig) -> list[ConflictReport]:
         """Compare toutes les paires de chunks de sources différentes parmi
