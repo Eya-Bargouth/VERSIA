@@ -152,8 +152,13 @@ class QdrantStore:
         filter: dict | None = None,
         k: int = 10,
     ) -> list[RetrievalResult]:
-        """Recherche dense par similarité cosinus."""
-        qdrant_filter = self._build_filter(filter) if filter else None
+        """Recherche dense par similarité cosinus.
+
+        Exclut toujours les nœuds `node_type="change"` (voir
+        `search_change_nodes`) — ce ne sont pas des chunks de contenu, un
+        appelant qui oublierait de les filtrer explicitement ne doit jamais
+        pouvoir les faire remonter dans une réponse factuelle par accident."""
+        qdrant_filter = self._exclude_change_nodes(self._build_filter(filter) if filter else None)
         results = self._execute_search(
             query_vector=query_embedding.tolist(),
             vector_name="dense",
@@ -176,8 +181,8 @@ class QdrantStore:
         filter: dict | None = None,
         k: int = 10,
     ) -> list[RetrievalResult]:
-        """Recherche sparse (SPLADE)."""
-        qdrant_filter = self._build_filter(filter) if filter else None
+        """Recherche sparse (SPLADE). Exclut les nœuds Change, voir search_dense."""
+        qdrant_filter = self._exclude_change_nodes(self._build_filter(filter) if filter else None)
         sparse_vector = SparseVector(
             indices=list(query_sparse.keys()),
             values=list(query_sparse.values()),
@@ -197,6 +202,77 @@ class QdrantStore:
             )
             for r in results
         ]
+
+    @staticmethod
+    def _exclude_change_nodes(filter_obj: Filter | None) -> Filter:
+        """Ajoute `must_not node_type=change` à un filtre existant (ou en
+        crée un) — appelé systématiquement par search_dense/search_sparse,
+        jamais contournable par un filtre appelant qui aurait oublié cette
+        exclusion (voir VersionRAG : les nœuds Change ne doivent jamais se
+        mélanger au contenu normal du retrieval générique)."""
+        exclusion = FieldCondition(key="node_type", match=MatchValue(value="change"))
+        if filter_obj is None:
+            return Filter(must_not=[exclusion])
+        must_not = list(filter_obj.must_not or []) + [exclusion]
+        return Filter(must=filter_obj.must, should=filter_obj.should, must_not=must_not)
+
+    def search_change_nodes(
+        self,
+        query_embedding: np.ndarray,
+        source_id: str,
+        version_from: str,
+        version_to: str,
+        k: int = 10,
+    ) -> list[RetrievalResult]:
+        """Recherche sémantique restreinte aux nœuds Change (voir
+        upsert_change_nodes) — chemin de retrieval dédié aux questions
+        comparatives (VersionRAG §4.2 "semantic search over indexed
+        changes"), jamais emprunté par le retrieval générique."""
+        qdrant_filter = Filter(
+            must=[
+                FieldCondition(key="node_type", match=MatchValue(value="change")),
+                FieldCondition(key="source_id", match=MatchValue(value=source_id)),
+                FieldCondition(key="version_from", match=MatchValue(value=version_from)),
+                FieldCondition(key="version_to", match=MatchValue(value=version_to)),
+            ]
+        )
+        results = self._execute_search(
+            query_vector=query_embedding.tolist(), vector_name="dense", filter_obj=qdrant_filter, k=k
+        )
+        return [
+            RetrievalResult(chunk_id=UUID(r.payload.get("chunk_id", str(r.id))), score=r.score, source="change", payload=r.payload)
+            for r in results
+        ]
+
+    def upsert_change_nodes(self, nodes: list[dict], embeddings: np.ndarray) -> None:
+        """Indexe des nœuds Change (description sémantique d'un changement
+        entre deux versions) comme des points Qdrant à part, marqués
+        `node_type="change"` — jamais retournés par search_dense/
+        search_sparse (voir _exclude_change_nodes), uniquement par
+        search_change_nodes.
+
+        `nodes` : liste de dicts {chunk_id, text, source_id, version_from,
+        version_to, hierarchy_path, change_type} — `chunk_id` est ici une clé
+        lisible (ex. "change-plaid-1.19.5-beta-1.20.6-<key>"), pas un UUID :
+        dérivée en UUID5 déterministe pour l'id du point ET pour
+        `payload["chunk_id"]` (RetrievalResult.chunk_id est typé UUID — voir
+        search_change_nodes), la clé lisible d'origine reste disponible sous
+        `payload["node_key"]` pour le débogage. `embeddings` : un vecteur
+        dense par nœud, même ordre — même embedder que le contenu normal
+        (BGE-M3), pour rester dans le même espace vectoriel."""
+        points = []
+        for node, vector in zip(nodes, embeddings):
+            point_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, node["chunk_id"]))
+            payload = {**node, "node_type": "change", "node_key": node["chunk_id"], "chunk_id": point_uuid}
+            points.append(
+                PointStruct(
+                    id=point_uuid,
+                    vector={"dense": vector.tolist()},
+                    payload=payload,
+                )
+            )
+        if points:
+            self.client.upsert(collection_name=self.collection_name, points=points)
 
     def _execute_search(self, query_vector, vector_name: str, filter_obj, k: int):
         """Wrapper défensif compatible search() et query_points()."""
@@ -272,6 +348,28 @@ class QdrantStore:
         `limit` borne le coût : une liste source dépassant 50 éléments est
         un cas extrême non visé ici."""
         must = [FieldCondition(key="parent_path", match=MatchValue(value=parent_path))]
+        if source_id:
+            must.append(FieldCondition(key="source_id", match=MatchValue(value=source_id)))
+        if version_tag:
+            must.append(FieldCondition(key="version_tag", match=MatchValue(value=version_tag)))
+        points, _ = self.client.scroll(
+            collection_name=self.collection_name,
+            scroll_filter=Filter(must=must),
+            limit=limit,
+            with_payload=True,
+        )
+        return [p.payload for p in points]
+
+    def get_by_hierarchy_path(
+        self, hierarchy_path: str, source_id: str | None = None, version_tag: str | None = None, limit: int = 5
+    ) -> list[dict]:
+        """Récupère les payloads des chunks dont le `hierarchy_path` est
+        EXACTEMENT celui donné (contrairement à `get_by_parent_path`, qui
+        récupère les frères d'une même liste source) — utilisé pour aller
+        chercher directement l'homologue d'une AUTRE version d'un même
+        nœud, quand une question comparative en a retrouvé un côté mais pas
+        l'autre (voir HybridRetriever._complete_version_pairs)."""
+        must = [FieldCondition(key="hierarchy_path", match=MatchValue(value=hierarchy_path))]
         if source_id:
             must.append(FieldCondition(key="source_id", match=MatchValue(value=source_id)))
         if version_tag:
