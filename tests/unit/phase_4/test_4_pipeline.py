@@ -263,7 +263,9 @@ class TestQueryPipelineStructuralConflicts:
             retriever=retriever,
         )
         result = pipeline.answer("Q?")
-        assert result.conflicts == [textual, structural]
+        # Structural (gratuit, déterministe) d'abord, textual (coûteux, LLM,
+        # gaté par sufficiency) ensuite — voir _detect_conflicts.
+        assert result.conflicts == [structural, textual]
 
 
 class TestQueryPipelineDiffExplanation:
@@ -284,7 +286,13 @@ class TestQueryPipelineDiffExplanation:
             "strategy": "deterministe",
             "confidence": "exact",
         }
-        retriever = _FakeRetriever(extra={"diff_available": True, "diff_report": diff_report})
+        # hierarchy_path du chunk retrouvé = préfixe (avant "|") de la clé du
+        # changement — seuls les changements correspondant à un chunk
+        # effectivement retrouvé sont conservés (voir _diff_explanation).
+        retriever = _FakeRetriever(
+            results=[{"chunk_id": str(uuid4()), "text": "t", "payload": {"hierarchy_path": "POST:/v1/orders"}}],
+            extra={"diff_available": True, "diff_report": diff_report},
+        )
         pipeline = _pipeline(retriever=retriever)
 
         pipeline.answer("Q?")
