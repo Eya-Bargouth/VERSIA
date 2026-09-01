@@ -193,6 +193,20 @@ class HybridRetriever:
             extra["diff_available"] = diff_report is not None
             if diff_report is not None:
                 extra["diff_report"] = diff_report.model_dump()
+                if query_embedding is not None:
+                    # Recherche sémantique sur les nœuds Change indexés
+                    # (voir scripts/index_version_changes.py, inspiré de
+                    # VersionRAG §4.2 "semantic search over indexed
+                    # changes") : identifie le changement pertinent depuis
+                    # le SENS de la question, pas seulement depuis ce que la
+                    # recherche vectorielle générique a retrouvé par
+                    # chance — signal plus fiable pour aller chercher
+                    # directement le contenu des deux côtés du diff.
+                    change_hits = self._search_relevant_changes(query_embedding, diff_report)
+                    if change_hits:
+                        extra["change_nodes"] = [c.payload for c in change_hits]
+                        candidates = self._fetch_content_for_changes(candidates, change_hits, diff_report)
+                candidates = self._complete_version_pairs(candidates, diff_report)
         elif intent == "ambiguous":
             # ambiguous → vector-only, flagged so callers can lower trust /
             # ask a clarifying question downstream.
@@ -535,6 +549,119 @@ class HybridRetriever:
             result.extend(kept)
 
         return result
+
+    def _search_relevant_changes(self, query_embedding: np.ndarray, diff_report, k: int = 5) -> List[RetrievalResult]:
+        """Recherche sémantique restreinte aux nœuds Change indexés pour ce
+        couple de versions (voir QdrantStore.search_change_nodes) — jamais
+        levée en erreur : un index Change absent ou incomplet doit
+        dégrader silencieusement vers le mécanisme existant
+        (_diff_explanation filtré par contenu retrouvé), pas faire échouer
+        la requête."""
+        if self.store is None:
+            return []
+        try:
+            return self.store.search_change_nodes(
+                query_embedding, diff_report.source_id, diff_report.version_from, diff_report.version_to, k=k
+            )
+        except Exception as exc:
+            logger.warning("change_node_search_failed", source_id=diff_report.source_id, error=str(exc))
+            return []
+
+    def _fetch_content_for_changes(
+        self, candidates: List[Dict[str, Any]], change_hits: List[RetrievalResult], diff_report
+    ) -> List[Dict[str, Any]]:
+        """Pour chaque nœud Change trouvé par recherche sémantique (la
+        question posée en langage naturel, comparée aux descriptions de
+        changements indexées), va chercher directement le contenu des deux
+        côtés du diff par `hierarchy_path` — signal plus ciblé que
+        `_complete_version_pairs` seul, qui ne complète que ce qui est
+        DÉJÀ présent dans `candidates` plutôt que d'aller chercher ce que
+        la recherche vectorielle générique aurait pu manquer entièrement."""
+        if self.store is None or not change_hits:
+            return candidates
+        existing_ids = {str(c.get("chunk_id")) for c in candidates}
+        extra: List[Dict[str, Any]] = []
+        for hit in change_hits:
+            path = hit.payload.get("hierarchy_path")
+            if not path:
+                continue
+            for tag in (diff_report.version_from, diff_report.version_to):
+                try:
+                    siblings = self.store.get_by_hierarchy_path(
+                        path, source_id=diff_report.source_id, version_tag=tag, limit=1
+                    )
+                except Exception as exc:
+                    logger.warning("change_content_fetch_failed", hierarchy_path=path, error=str(exc))
+                    continue
+                for payload in siblings:
+                    chunk_id = payload.get("chunk_id")
+                    if not chunk_id or chunk_id in existing_ids:
+                        continue
+                    extra.append({"chunk_id": chunk_id, "score": 0.0, "text": payload.get("text", ""), "payload": payload})
+                    existing_ids.add(chunk_id)
+        return candidates + extra
+
+    def _complete_version_pairs(self, candidates: List[Dict[str, Any]], diff_report) -> List[Dict[str, Any]]:
+        """Pour les questions comparatives (diff_report chargé) : si un
+        candidat retrouvé appartient à l'une des deux versions comparées
+        mais que son homologue exact (même `hierarchy_path`, autre
+        `version_tag`) n'est pas déjà dans le lot, va le chercher
+        directement — plutôt que de compter sur le retrieval vectoriel
+        seul à classer les deux côtés d'un diff dans le même top-k.
+
+        Mesuré en conditions réelles : context_precision=0.0 récurrent sur
+        les questions version_conflict, le générateur ne recevant souvent
+        qu'un seul côté de la comparaison demandée. Un appel Qdrant (scroll,
+        pas de recherche vectorielle) par nœud candidat concerné — coût
+        négligeable, même principe que `_fetch_missing_siblings`.
+
+        Générique : ne dépend que de `hierarchy_path`/`version_tag`
+        (propriétés du chunking versionné), jamais d'un nom de source."""
+        if self.store is None:
+            return candidates
+
+        version_from, version_to = diff_report.version_from, diff_report.version_to
+        present = {
+            (c.get("payload", {}).get("hierarchy_path"), c.get("payload", {}).get("version_tag"))
+            for c in candidates
+        }
+        seen_ids = {str(c.get("chunk_id")) for c in candidates}
+        extra: List[Dict[str, Any]] = []
+
+        for candidate in candidates:
+            payload = candidate.get("payload", {})
+            path = payload.get("hierarchy_path")
+            tag = payload.get("version_tag")
+            if not path or tag not in (version_from, version_to):
+                continue
+            other_tag = version_to if tag == version_from else version_from
+            if (path, other_tag) in present:
+                continue
+            present.add((path, other_tag))  # une seule tentative par (path, other_tag)
+
+            try:
+                siblings = self.store.get_by_hierarchy_path(
+                    path, source_id=diff_report.source_id, version_tag=other_tag, limit=1
+                )
+            except Exception as exc:
+                logger.warning("version_counterpart_fetch_failed", hierarchy_path=path, error=str(exc))
+                continue
+
+            for sibling_payload in siblings:
+                sibling_chunk_id = sibling_payload.get("chunk_id")
+                if not sibling_chunk_id or sibling_chunk_id in seen_ids:
+                    continue
+                extra.append(
+                    {
+                        "chunk_id": sibling_chunk_id,
+                        "score": 0.0,
+                        "text": sibling_payload.get("text", ""),
+                        "payload": sibling_payload,
+                    }
+                )
+                seen_ids.add(sibling_chunk_id)
+
+        return candidates + extra
 
     def _fetch_missing_siblings(self, candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Complète chaque groupe de fratrie représenté dans les candidats
