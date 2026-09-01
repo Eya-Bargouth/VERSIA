@@ -7,9 +7,9 @@ import re
 from typing import Literal
 
 import structlog
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
-from src.llm.interface import BaseLLMClient, LLMConfig, LLMMessage
+from src.llm.interface import BaseLLMClient, LLMConfig, LLMMessage, normalize_llm_scale
 
 logger = structlog.get_logger(__name__)
 
@@ -39,6 +39,11 @@ class SufficiencyVerdict(BaseModel):
 class _RawSufficiencyOutput(BaseModel):
     verdict: Literal["sufficient", "partial", "insufficient"]
     confidence: float = Field(ge=0.0, le=1.0)
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _normalize_scale(cls, v):
+        return normalize_llm_scale(v)
 
 
 class SufficiencyChecker:

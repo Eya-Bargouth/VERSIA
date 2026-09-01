@@ -111,11 +111,33 @@ class QueryPipeline:
     def _diff_explanation(retrieval: dict) -> str | None:
         """Reconstruit le texte de diff pour les questions comparatives, à
         partir du DiffReport (sérialisé en dict) déjà chargé par
-        HybridRetriever — pas de nouvel accès disque ici."""
+        HybridRetriever — pas de nouvel accès disque ici.
+
+        Filtre aux changements pertinents pour les chunks effectivement
+        retrouvés : un DiffReport couvre TOUT le document (ex. 909
+        changements pour Plaid 1.19.5-beta->1.20.6), et injecter la totalité
+        dans le prompt noie le changement réellement demandé sous des
+        centaines de lignes sans rapport — mesuré en conditions réelles :
+        hallucinations (contenu inventé absent du contexte) et verdicts
+        sufficiency erratiques (même question : "partial" puis "insufficient"
+        selon les runs, le LLM ne "retrouvant" la bonne ligne qu'au hasard
+        dans un texte massif). change.key suit le format
+        "{hierarchy_path}|{type}#{ordinal}" (voir
+        src/ingestion/version_diff.py::_generic_key) — même hierarchy_path
+        que celui déjà exposé dans le payload des chunks retrouvés, donc pas
+        de couplage à un format de source particulier."""
         diff_report = retrieval.get("diff_report")
         if not diff_report:
             return None
         changes = [Change(**c) for c in diff_report["changes"]]
+
+        retrieved_paths = {
+            path
+            for c in retrieval.get("results", [])
+            if (path := c.get("payload", {}).get("hierarchy_path"))
+        }
+        changes = [c for c in changes if c.key.rsplit("|", 1)[0] in retrieved_paths]
+
         return summarize_changes(changes, diff_report["version_from"], diff_report["version_to"])
 
     def _detect_conflicts(
@@ -125,24 +147,35 @@ class QueryPipeline:
         (déterministe, à partir du diff précalculé déjà chargé par
         HybridRetriever pour les questions comparatives). detect_structural
         existait déjà et était testé isolément, mais n'avait aucun point
-        d'appel en prod — seul detect_textual était invoqué ici."""
-        if self.conflict_detector is None:
-            return []
-        if sufficiency.verdict == "insufficient":
-            return []
-        if sufficiency.confidence < self.conflict_sufficiency_threshold:
-            return []
+        d'appel en prod — seul detect_textual était invoqué ici.
 
-        reports = list(self.conflict_detector.detect_textual(chunks, self.llm_config))
+        Le seuil de suffisance (self.conflict_sufficiency_threshold) ne gate
+        que detect_textual : un appel LLM par paire de chunks cross-source,
+        coûteux et inutile si la question va de toute façon aboutir à une
+        abstention. detect_structural, lui, ne coûte rien (simple lecture
+        d'un diff déjà précalculé sur disque) et ne dépend d'aucun jugement
+        LLM — le gater derrière le même seuil masquait des conflits réels
+        (mesuré : n_conflicts=0 alors qu'un diff existait bel et bien,
+        uniquement parce que sufficiency.verdict valait "insufficient" pour
+        cette question précise)."""
+        reports: list[ConflictReport] = []
 
         diff_report = retrieval.get("diff_report")
-        if diff_report:
+        if diff_report and self.conflict_detector is not None:
             structural = self.conflict_detector.detect_structural(
                 diff_report["source_id"], diff_report["version_from"], diff_report["version_to"]
             )
             if structural.conflict:
                 reports.append(structural)
 
+        if self.conflict_detector is None:
+            return reports
+        if sufficiency.verdict == "insufficient":
+            return reports
+        if sufficiency.confidence < self.conflict_sufficiency_threshold:
+            return reports
+
+        reports.extend(self.conflict_detector.detect_textual(chunks, self.llm_config))
         return reports
 
     @staticmethod
