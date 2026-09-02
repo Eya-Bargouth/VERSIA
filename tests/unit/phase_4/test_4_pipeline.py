@@ -73,8 +73,9 @@ class _FakeConflictDetector:
         self.called = True
         return self.reports
 
-    def detect_structural(self, source_id, version_from, version_to, key=None):
+    def detect_structural(self, source_id, version_from, version_to, key=None, hierarchy_paths=None):
         self.structural_called_with = (source_id, version_from, version_to, key)
+        self.structural_called_with_hierarchy_paths = hierarchy_paths
         return self.structural_report
 
 
@@ -336,3 +337,192 @@ class TestQueryPipelineDiffExplanation:
         gen_diff = pipeline.generator.called_with["diff_explanation"]
         assert suff_diff is not None
         assert suff_diff == gen_diff
+
+
+class TestQueryPipelineChangeNodePriority:
+    """Quand des nœuds Change ont été trouvés par recherche sémantique
+    (retrieval["change_nodes"]), diff_explanation doit se restreindre au
+    SEUL meilleur hit — pas à tout changement dont le hierarchy_path
+    correspond à N'IMPORTE LEQUEL des chunks retrouvés. Mesuré en
+    conditions réelles : plusieurs endpoints partagent un même nom de champ
+    (ex. "consent_expiration_time"), et l'ancien filtre laissait passer les
+    changements de TOUS ces endpoints, faisant dériver le générateur loin
+    de la question posée."""
+
+    def _diff_report(self):
+        return {
+            "source_id": "plaid",
+            "version_from": "1.19.5-beta",
+            "version_to": "1.20.6",
+            "changes": [
+                {
+                    "key": "schemas.Item.consent_expiration_time|document#0",
+                    "change_type": "modified",
+                    "field_changes": {"format": {"old": None, "new": "date-time"}},
+                    "old_content_hash": "a",
+                    "new_content_hash": "b",
+                },
+                {
+                    "key": "schemas.AccountsGetResponse.consent_expiration_time|document#0",
+                    "change_type": "modified",
+                    "field_changes": {"format": {"old": None, "new": "date-time"}},
+                    "old_content_hash": "c",
+                    "new_content_hash": "d",
+                },
+            ],
+            "strategy": "deterministe",
+            "confidence": "exact",
+        }
+
+    def test_only_top_change_node_kept_even_with_other_matching_chunks(self):
+        retriever = _FakeRetriever(
+            results=[
+                {"chunk_id": str(uuid4()), "text": "t1", "payload": {"hierarchy_path": "schemas.Item.consent_expiration_time"}},
+                {"chunk_id": str(uuid4()), "text": "t2", "payload": {"hierarchy_path": "schemas.AccountsGetResponse.consent_expiration_time"}},
+            ],
+            extra={
+                "diff_available": True,
+                "diff_report": self._diff_report(),
+                "change_nodes": [{"hierarchy_path": "schemas.Item.consent_expiration_time"}],
+            },
+        )
+        pipeline = _pipeline(retriever=retriever)
+
+        pipeline.answer("Q?")
+
+        diff_explanation = pipeline.generator.called_with["diff_explanation"]
+        assert "schemas.Item.consent_expiration_time" in diff_explanation
+        assert "schemas.AccountsGetResponse.consent_expiration_time" not in diff_explanation
+
+    def test_falls_back_to_retrieved_chunks_when_no_change_nodes(self):
+        """Sans change_nodes (index absent ou rien trouvé), repli sur le
+        comportement précédent — les deux chunks retrouvés contribuent."""
+        retriever = _FakeRetriever(
+            results=[
+                {"chunk_id": str(uuid4()), "text": "t1", "payload": {"hierarchy_path": "schemas.Item.consent_expiration_time"}},
+                {"chunk_id": str(uuid4()), "text": "t2", "payload": {"hierarchy_path": "schemas.AccountsGetResponse.consent_expiration_time"}},
+            ],
+            extra={"diff_available": True, "diff_report": self._diff_report()},
+        )
+        pipeline = _pipeline(retriever=retriever)
+
+        pipeline.answer("Q?")
+
+        diff_explanation = pipeline.generator.called_with["diff_explanation"]
+        assert "schemas.Item.consent_expiration_time" in diff_explanation
+        assert "schemas.AccountsGetResponse.consent_expiration_time" in diff_explanation
+
+
+class TestQueryPipelineNarrowedGenerationContext:
+    """Priorité 3 : pour les questions comparatives, le générateur ne doit
+    recevoir que les chunks du hierarchy_path ciblé (voir
+    _target_hierarchy_paths), pas le pool top-10 mélangé — mesuré comme
+    cause de dérive du générateur (qwen2.5:3b ET gemma3:4b) vers des
+    endpoints non demandés, épuisant le budget de génération avant de
+    clore le JSON. Le sufficiency checker, lui, continue de recevoir le
+    pool complet (portée du changement volontairement limitée à la
+    génération)."""
+
+    def _diff_report(self):
+        return {
+            "source_id": "plaid",
+            "version_from": "1.19.5-beta",
+            "version_to": "1.20.6",
+            "changes": [
+                {
+                    "key": "schemas.Item.consent_expiration_time|document#0",
+                    "change_type": "modified",
+                    "field_changes": {"format": {"old": None, "new": "date-time"}},
+                    "old_content_hash": "a",
+                    "new_content_hash": "b",
+                }
+            ],
+            "strategy": "deterministe",
+            "confidence": "exact",
+        }
+
+    def test_generator_receives_only_target_chunks(self):
+        target_chunk = {
+            "chunk_id": str(uuid4()),
+            "text": "target",
+            "payload": {"hierarchy_path": "schemas.Item.consent_expiration_time"},
+        }
+        unrelated_chunk = {
+            "chunk_id": str(uuid4()),
+            "text": "unrelated",
+            "payload": {"hierarchy_path": "schemas.AccountsGetResponse.consent_expiration_time"},
+        }
+        retriever = _FakeRetriever(
+            results=[target_chunk, unrelated_chunk],
+            extra={
+                "diff_available": True,
+                "diff_report": self._diff_report(),
+                "change_nodes": [{"hierarchy_path": "schemas.Item.consent_expiration_time"}],
+            },
+        )
+        pipeline = _pipeline(retriever=retriever)
+
+        pipeline.answer("Q?")
+
+        assert pipeline.generator.called_with["chunks"] == [target_chunk]
+
+    def test_sufficiency_checker_still_receives_full_chunk_pool(self):
+        target_chunk = {
+            "chunk_id": str(uuid4()),
+            "text": "target",
+            "payload": {"hierarchy_path": "schemas.Item.consent_expiration_time"},
+        }
+        unrelated_chunk = {
+            "chunk_id": str(uuid4()),
+            "text": "unrelated",
+            "payload": {"hierarchy_path": "schemas.AccountsGetResponse.consent_expiration_time"},
+        }
+        retriever = _FakeRetriever(
+            results=[target_chunk, unrelated_chunk],
+            extra={
+                "diff_available": True,
+                "diff_report": self._diff_report(),
+                "change_nodes": [{"hierarchy_path": "schemas.Item.consent_expiration_time"}],
+            },
+        )
+        pipeline = _pipeline(retriever=retriever)
+
+        pipeline.answer("Q?")
+
+        _, context_passed, _ = pipeline.sufficiency_checker.called_with
+        assert context_passed == [target_chunk, unrelated_chunk]
+
+    def test_falls_back_to_full_pool_when_narrowing_would_empty_it(self):
+        """Si aucun chunk retrouvé ne matche le hierarchy_path ciblé (ne
+        devrait pas arriver en pratique grâce à _fetch_content_for_changes,
+        mais mieux vaut garder le pool complet qu'un contexte vide)."""
+        orphan_chunk = {
+            "chunk_id": str(uuid4()),
+            "text": "orphan",
+            "payload": {"hierarchy_path": "schemas.Unrelated.other_field"},
+        }
+        retriever = _FakeRetriever(
+            results=[orphan_chunk],
+            extra={
+                "diff_available": True,
+                "diff_report": self._diff_report(),
+                "change_nodes": [{"hierarchy_path": "schemas.Item.consent_expiration_time"}],
+            },
+        )
+        pipeline = _pipeline(retriever=retriever)
+
+        pipeline.answer("Q?")
+
+        assert pipeline.generator.called_with["chunks"] == [orphan_chunk]
+
+    def test_non_comparative_question_keeps_full_chunk_pool(self):
+        """Sans diff_report (intent non comparatif), aucun narrowing —
+        comportement inchangé pour factual/ambiguous/abstention/multi_source."""
+        chunk_a = {"chunk_id": str(uuid4()), "text": "a", "payload": {"hierarchy_path": "some.path"}}
+        chunk_b = {"chunk_id": str(uuid4()), "text": "b", "payload": {"hierarchy_path": "other.path"}}
+        retriever = _FakeRetriever(results=[chunk_a, chunk_b])
+        pipeline = _pipeline(retriever=retriever)
+
+        pipeline.answer("Q?")
+
+        assert pipeline.generator.called_with["chunks"] == [chunk_a, chunk_b]
