@@ -5,20 +5,25 @@ WORKDIR /app
 # Dépendances système
 RUN apt-get update && apt-get install -y --no-install-recommends     gcc     libpq-dev     curl     && rm -rf /var/lib/apt/lists/*
 
+ENV PIP_DEFAULT_TIMEOUT=300
+# torch ET torchvision ensemble, depuis le même index CPU, AVANT COPY
+# pyproject.toml : ce layer (~600MB+ téléchargé) ne doit dépendre que de
+# lui-même — placé après COPY pyproject.toml, toute modification du fichier
+# (ex. ajout d'une dépendance légère comme python-multipart) invalidait le
+# cache Docker de CE layer aussi et forçait un re-téléchargement complet de
+# torch alors qu'il n'avait pas changé (constaté en conditions réelles).
+# torchvision tiré séparément par pip install -e "." (transitif via
+# docling/unstructured) viendrait du PyPI standard, compilé contre un torch
+# CUDA-capable — ses extensions compilées (ex. l'op torchvision::nms) ne
+# correspondent alors plus au build +cpu de torch, et tout code touchant
+# torchvision plante à l'exécution (RuntimeError: operator torchvision::nms
+# does not exist), y compris transformers.image_utils, importé même pour
+# des modèles texte-only comme BGE-M3.
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
 # Python deps
 COPY pyproject.toml ./
 COPY src/ ./src/
-
-ENV PIP_DEFAULT_TIMEOUT=300
-# torch ET torchvision ensemble, depuis le même index CPU : torchvision tiré
-# séparément par pip install -e "." (transitif via docling/unstructured)
-# viendrait du PyPI standard, compilé contre un torch CUDA-capable — ses
-# extensions compilées (ex. l'op torchvision::nms) ne correspondent alors
-# plus au build +cpu de torch, et tout code touchant torchvision plante à
-# l'exécution (RuntimeError: operator torchvision::nms does not exist),
-# y compris transformers.image_utils, importé même pour des modèles
-# texte-only comme BGE-M3.
-RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
 RUN pip install --no-cache-dir -e "."
 
