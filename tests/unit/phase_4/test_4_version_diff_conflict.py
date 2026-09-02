@@ -107,3 +107,30 @@ class TestVersionDiffConflictDetector:
         assert report.conflict is True
         assert _WHOLE_DOC_KEY in report.explanation
         assert "openapi" in report.explanation
+
+    def test_hierarchy_paths_filter_keeps_matching_change(self, precomputed_diff):
+        detector = VersionDiffConflictDetector(diff_dir=precomputed_diff)
+        hierarchy_path = _WHOLE_DOC_KEY.rsplit("|", 1)[0]
+        report = detector.detect("test_api", "1.0.0", "2.0.0", hierarchy_paths={hierarchy_path})
+        assert report.conflict is True
+        assert "openapi" in report.explanation
+
+    def test_hierarchy_paths_filter_excludes_unrelated_change(self, precomputed_diff):
+        detector = VersionDiffConflictDetector(diff_dir=precomputed_diff)
+        report = detector.detect("test_api", "1.0.0", "2.0.0", hierarchy_paths={"some > unrelated > path"})
+        assert report.conflict is False
+
+    def test_empty_hierarchy_paths_set_excludes_everything(self, precomputed_diff):
+        """Ensemble vide explicitement passé (rien de pertinent retrouvé par
+        le retrieval) : doit produire 0 changement, pas retomber sur le
+        comportement non filtré — voir docstring de detect()."""
+        detector = VersionDiffConflictDetector(diff_dir=precomputed_diff)
+        report = detector.detect("test_api", "1.0.0", "2.0.0", hierarchy_paths=set())
+        assert report.conflict is False
+
+    def test_no_hierarchy_paths_arg_keeps_unfiltered_behavior(self, precomputed_diff):
+        """hierarchy_paths=None (défaut) : comportement historique inchangé,
+        agrège tout le diff — rétrocompatibilité des appelants existants."""
+        detector = VersionDiffConflictDetector(diff_dir=precomputed_diff)
+        report = detector.detect("test_api", "1.0.0", "2.0.0")
+        assert report.conflict is True
