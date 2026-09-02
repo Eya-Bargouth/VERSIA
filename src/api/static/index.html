@@ -19,6 +19,18 @@
   --radius:12px; --radius-sm:7px;
   --font-display:'Space Grotesk',sans-serif; --font-body:'Inter',sans-serif; --font-mono:'IBM Plex Mono',monospace;
 }
+/* Thème clair — bascule manuelle (bouton topbar), pas de préférence système
+   suivie automatiquement : ce n'est pas un Artifact, juste une bascule
+   explicite persistée en localStorage (voir setTheme()/initTheme()). */
+:root[data-theme="light"]{
+  --bg:#f4f5f7; --surface:#ffffff; --surface-2:#f0f1f3; --surface-3:#e7e9ec;
+  --border:#dde0e5; --border-strong:#c7cbd2;
+  --text:#1b1e24; --text-dim:#565e6b; --text-faint:#8a919c;
+  --gold:#a97f2c; --gold-dim:#8a7038; --gold-bg:rgba(169,127,44,0.10);
+  --good:#1f9d6e; --good-bg:rgba(31,157,110,0.10);
+  --warn:#b8791e; --warn-bg:rgba(184,121,30,0.10);
+  --bad:#c73a58; --bad-bg:rgba(199,58,88,0.10);
+}
 @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important;}}
 *{box-sizing:border-box;margin:0;padding:0;}
 html,body{height:100%;}
@@ -58,6 +70,9 @@ code{font-family:var(--font-mono);}
 .mode-toggle{display:flex;background:var(--surface-2);border:1px solid var(--border);border-radius:999px;padding:3px;gap:2px;flex-shrink:0;}
 .mode-toggle button{padding:6px 14px;border-radius:999px;font-size:12px;color:var(--text-dim);background:none;border:none;font-weight:500;}
 .mode-toggle button.active{background:var(--gold);color:#171308;}
+.theme-toggle{display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:50%;background:var(--surface-2);border:1px solid var(--border);color:var(--text-dim);flex-shrink:0;}
+.theme-toggle:hover{color:var(--gold);border-color:var(--gold-dim);}
+.theme-toggle svg{display:block;}
 .avatar{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#3a3120,#20242c);border:1px solid var(--border-strong);display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:11px;color:var(--gold);flex-shrink:0;}
 
 /* ============ SHELL ============ */
@@ -150,11 +165,26 @@ code{font-family:var(--font-mono);}
 .signal-chip.good .dot{background:var(--good);} .signal-chip.warn .dot{background:var(--warn);} .signal-chip.bad .dot{background:var(--bad);} .signal-chip.neutral .dot{background:var(--text-faint);}
 .signal-chip code{color:var(--text);background:none;}
 
-.response-body{display:grid;grid-template-columns:1fr 360px;gap:22px;align-items:start;}
-.response-body.rail-hidden{grid-template-columns:1fr;max-width:760px;}
+.response-body{max-width:760px;margin:0 auto;}
 .response-main{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px 26px;}
 .answer-text{font-size:15.5px;line-height:1.85;color:var(--text);}
 .answer-text strong{color:#fff;}
+:root[data-theme="light"] .answer-text strong{color:#000;}
+.answer-text.fallback{font-size:11.5px;line-height:1.6;}
+
+.answer-fallback-label{font-size:11.5px;color:var(--text-faint);margin-bottom:8px;}
+
+.answer-caveat{margin-top:14px;font-size:11.5px;color:var(--text-faint);font-style:italic;}
+
+.loading-dots{display:flex;align-items:center;gap:6px;padding:10px 2px;}
+.loading-dots span{width:8px;height:8px;border-radius:50%;background:var(--gold);animation:dot-bounce 1.2s infinite ease-in-out;}
+.loading-dots span:nth-child(2){animation-delay:.15s;}
+.loading-dots span:nth-child(3){animation-delay:.3s;}
+@keyframes dot-bounce{0%,80%,100%{transform:translateY(0);opacity:.4;}40%{transform:translateY(-6px);opacity:1;}}
+
+.trace-block{margin-top:20px;padding:13px 16px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-family:var(--font-mono);font-size:10.5px;color:var(--text-dim);line-height:1.8;white-space:pre;}
+.citations-block{margin-top:16px;padding-top:16px;border-top:1px solid var(--border);}
+.citations-block h3{font-family:var(--font-display);font-size:13.5px;font-weight:600;margin-bottom:4px;}
 
 .cite{display:inline-flex;align-items:center;justify-content:center;gap:2px;min-width:17px;height:17px;padding:0 5px;margin:0 1px;border-radius:4px;font-family:var(--font-mono);font-size:10px;font-weight:700;vertical-align:2px;cursor:pointer;}
 .cite:hover{transform:translateY(-1px);}
@@ -192,8 +222,6 @@ code{font-family:var(--font-mono);}
 .reason-list li{position:relative;padding-left:17px;font-size:13px;color:var(--text-dim);line-height:1.6;margin-bottom:7px;}
 .reason-list li::before{content:'—';position:absolute;left:0;color:var(--bad);}
 
-.citations-rail{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px;position:sticky;top:78px;max-height:calc(100vh - 100px);overflow-y:auto;}
-.citations-rail h3{font-family:var(--font-display);font-size:13.5px;font-weight:600;margin-bottom:4px;}
 .rail-sub{font-size:11px;color:var(--text-faint);margin-bottom:14px;line-height:1.4;}
 .rail-cite{border:1px solid var(--border);border-radius:8px;padding:11px 12px;margin-bottom:9px;}
 .rail-cite.flash{border-color:var(--gold);background:var(--gold-bg);}
@@ -206,12 +234,8 @@ code{font-family:var(--font-mono);}
 .support-badge.full{background:var(--good-bg);color:var(--good);}
 .support-badge.partial{background:var(--warn-bg);color:var(--warn);border:1px dashed rgba(224,168,62,.6);}
 .support-badge.none{background:var(--bad-bg);color:var(--bad);border:1px solid var(--bad);}
-.rail-trace{margin-top:8px;padding:13px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-family:var(--font-mono);font-size:10.5px;color:var(--text-dim);line-height:1.8;white-space:pre;}
-
 @media (max-width:980px){
-  .response-body{grid-template-columns:1fr;}
-  .response-body.rail-hidden{max-width:none;}
-  .citations-rail{position:static;max-height:none;}
+  .response-body{max-width:none;}
   .sidebar{position:fixed;top:58px;bottom:0;left:0;z-index:20;transform:translateX(-105%);transition:transform .2s;}
   .sidebar.show{transform:translateX(0);}
   .icon-btn{display:flex;}
@@ -246,6 +270,9 @@ code{font-family:var(--font-mono);}
     <button class="mode-btn active" data-mode="simple">Simple</button>
     <button class="mode-btn" data-mode="technique">Technique</button>
   </div>
+  <button class="theme-toggle" id="themeToggle" aria-label="Changer de thème" title="Changer de thème">
+    <svg id="themeIcon" width="16" height="16" viewBox="0 0 16 16" fill="none"></svg>
+  </button>
   <div class="avatar">AL</div>
 </header>
 
@@ -266,6 +293,13 @@ code{font-family:var(--font-mono);}
     </div>
 
     <div class="sidebar-pane" id="pane-ingest">
+      <label class="field-label">Ajouter un document</label>
+      <input class="field-input" id="uploadSourceId" placeholder="source_id (ex. plaid, ou un nouveau nom)">
+      <input class="field-input" id="uploadFile" type="file">
+      <button class="btn-ingest" id="uploadBtn">Uploader + ingérer</button>
+
+      <div style="height:1px;background:var(--border);margin:16px 0;"></div>
+
       <label class="field-label">raw_dir</label>
       <input class="field-input" id="ingestRawDir" value="raw/">
       <label class="field-label">versioning_dir (optionnel)</label>
@@ -301,7 +335,6 @@ code{font-family:var(--font-mono);}
           <div class="query-recap">
             <div class="recap-label">Résultat pour</div>
             <h2 id="recapQuery"></h2>
-            <div class="meta-inline" id="metaInline"></div>
           </div>
         </div>
 
@@ -310,7 +343,6 @@ code{font-family:var(--font-mono);}
 
         <div class="response-body" id="responseBody">
           <div class="response-main" id="responseMain"></div>
-          <aside class="citations-rail" id="citationsRail"></aside>
         </div>
       </div>
     </section>
@@ -337,6 +369,21 @@ const EXAMPLE_QUERIES = [
 let mode = "simple";
 let currentResult = null;   // dernier PipelineResult reçu
 let history = [];           // [{query, result}]
+
+/* ---- thème clair/sombre ---- */
+const SUN_PATH = '<circle cx="8" cy="8" r="3.2" stroke="currentColor" stroke-width="1.4"/><path d="M8 1v1.6M8 13.4V15M15 8h-1.6M2.6 8H1M12.7 3.3l-1.13 1.13M4.43 11.57L3.3 12.7M12.7 12.7l-1.13-1.13M4.43 4.43L3.3 3.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>';
+const MOON_PATH = '<path d="M13.5 9.3A5.8 5.8 0 016.7 2.5a5.8 5.8 0 106.8 6.8z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>';
+
+function setTheme(theme){
+  document.documentElement.setAttribute('data-theme', theme);
+  document.getElementById('themeIcon').innerHTML = theme === 'light' ? SUN_PATH : MOON_PATH;
+  try{ localStorage.setItem('trade-theme', theme); }catch(e){}
+}
+function initTheme(){
+  let saved = null;
+  try{ saved = localStorage.getItem('trade-theme'); }catch(e){}
+  setTheme(saved === 'light' ? 'light' : 'dark');
+}
 
 function escapeHTML(str){
   const div = document.createElement('div');
@@ -410,8 +457,7 @@ async function runQuery(question){
   document.getElementById('verdictBanner').className = 'banner';
   document.getElementById('verdictBanner').innerHTML = `<div class="banner-text"><div class="banner-label" style="color:var(--text-dim)">Recherche en cours…</div><div class="banner-sentence">POST /query — embeddings, retrieval hybride, reranking et génération peuvent prendre plusieurs secondes.</div></div>`;
   document.getElementById('signalStrip').innerHTML = '';
-  document.getElementById('responseMain').innerHTML = '';
-  document.getElementById('citationsRail').style.display = 'none';
+  document.getElementById('responseMain').innerHTML = '<div class="loading-dots"><span></span><span></span><span></span></div>';
 
   try{
     const resp = await fetch('/query', {
@@ -426,7 +472,7 @@ async function runQuery(question){
     const result = await resp.json();
     currentResult = result;
     pushHistory(question, result);
-    showResponseScreen(question, result);
+    showResponseScreen(question, result, {animate:true});
   }catch(e){
     renderQueryError(question, e.message);
   }
@@ -448,17 +494,17 @@ function goToQuery(){
 function setMode(m){
   mode = m;
   document.querySelectorAll('.mode-btn').forEach(b=> b.classList.toggle('active', b.dataset.mode===m));
-  if(!document.getElementById('screen-response').hidden && currentResult) renderResponse();
+  if(!document.getElementById('screen-response').hidden && currentResult) renderResponse(false);
 }
 
-function showResponseScreen(query, result){
+function showResponseScreen(query, result, opts={}){
   currentResult = result;
   document.getElementById('screen-query').hidden = true;
   document.getElementById('screen-response').hidden = false;
   document.getElementById('recapQuery').textContent = query;
   window.scrollTo(0,0);
   renderHistory();
-  renderResponse();
+  renderResponse(!!opts.animate);
 }
 
 /* Surligne, dans le texte réel de `answer`, les segments qui
@@ -497,17 +543,96 @@ function buildAnswerHTML(answer, citations){
   return html;
 }
 
-function renderResponse(){
+const CAVEAT_PREFIX = '(Confiance modérée — à vérifier) ';
+const RECONSTRUCTED_PREFIX = '(Réponse reconstruite automatiquement depuis les citations — non synthétisée par le modèle, à vérifier) ';
+/* Les deux préfixes sont ajoutés côté backend au texte de `answer` lui-même
+   (CAVEAT_PREFIX par QueryPipeline._finalize_answer — AbstentionGate a le
+   dernier mot sur le texte visible, voir docs/PHASE_4_SUMMARY.md §6 ;
+   RECONSTRUCTED_PREFIX par Generator quand le JSON du modèle était invalide
+   et que la réponse a été reconstituée à partir des citations). Détachés
+   ici uniquement pour l'affichage (repositionnement, étiquette courte,
+   taille réduite) — le backend et ses tests restent inchangés. */
+function splitCaveat(answer){
+  let text = answer || '';
+  let caveat = null;
+  let fallback = false;
+  if(text.startsWith(CAVEAT_PREFIX)){
+    caveat = 'Confiance modérée — à vérifier';
+    text = text.slice(CAVEAT_PREFIX.length);
+  }
+  if(text.startsWith(RECONSTRUCTED_PREFIX)){
+    fallback = true;
+    text = text.slice(RECONSTRUCTED_PREFIX.length);
+  }
+  return {caveat, fallback, text};
+}
+
+let _revealToken = 0;
+
+/* Révèle `text` mot par mot dans `container` (texte brut, sans surlignage
+   citation) pendant que la réponse "arrive" visuellement, puis appelle
+   `onDone` — qui bascule vers le HTML enrichi (citations surlignées,
+   cf. buildAnswerHTML) une fois la révélation terminée. `_revealToken`
+   invalide toute révélation en cours si une nouvelle réponse arrive
+   entretemps (nouvelle recherche pendant l'animation précédente). */
+function revealAnswerWordByWord(container, text, onDone){
+  const myToken = ++_revealToken;
+  const tokens = (text || '').split(/(\s+)/);
+  container.textContent = '';
+  container.style.whiteSpace = 'pre-wrap';
+  let i = 0;
+  function step(){
+    if(myToken !== _revealToken) return;
+    if(i >= tokens.length){ onDone(); return; }
+    container.textContent += tokens[i];
+    const isWord = i % 2 === 0 && tokens[i].trim() !== '';
+    i++;
+    setTimeout(step, isWord ? 32 : 0);
+  }
+  step();
+}
+
+function finalizeAnswerHTML(container, text, citations, fallback){
+  container.style.whiteSpace = '';
+  if(fallback){
+    // Réponse reconstituée directement à partir des citations (JSON du
+    // modèle invalide, repli — voir Generator._reconstruct_from_citations
+    // côté backend) : chaque mot provient déjà d'une citation, donc
+    // surligner l'intégralité du texte en vert (comportement par défaut de
+    // buildAnswerHTML) n'apporte rien et rend la réponse illisible —
+    // affichée en texte simple, sans surlignage citation.
+    container.innerHTML = escapeHTML(text).replace(/\n/g, '<br>');
+  } else {
+    container.innerHTML = buildAnswerHTML(text, citations);
+    container.querySelectorAll('.cite').forEach(el=>{
+      el.addEventListener('click', ()=> onCiteClick(el.getAttribute('data-citation-id')));
+    });
+  }
+}
+
+function technicalDetailsHTML(r){
+  let html = `<div class="trace-block">intent      : ${escapeHTML(r.retrieval_metadata.intent||'')}\nstrategy    : ${escapeHTML(r.retrieval_metadata.strategy||'')}\ncandidates  : ${r.retrieval_metadata.candidates}\nlatency_ms  : ${r.retrieval_metadata.latency_ms}</div>`;
+  if(r.citations.length>0){
+    html += `<div class="citations-block"><h3>Citations</h3><p class="rail-sub">${r.citations.length} passage(s) source, traçables ligne par ligne</p>`;
+    r.citations.forEach((c, idx)=>{
+      html += `<div class="rail-cite" id="rail-cite-${c.citation_id}">
+        <div class="rail-cite-head">
+          <span class="rail-cite-num">[${idx+1}]</span>
+          <span class="rail-cite-section">${escapeHTML(c.document)}${c.section?' — '+escapeHTML(c.section):''}</span>
+        </div>
+        <div class="rail-cite-loc">${c.page?`p. ${c.page} · `:''}${c.line?`l. ${c.line} · `:''}chunk ${escapeHTML(String(c.chunk_id).slice(0,8))}…</div>
+        <div class="rail-cite-excerpt">« ${escapeHTML(c.text_span)} »</div>
+        <span class="support-badge ${supClass(c.support_level)}">${c.support_level}</span>
+      </div>`;
+    });
+    html += `</div>`;
+  }
+  return html;
+}
+
+function renderResponse(animate){
   const r = currentResult;
   const abstain = r.citations.length === 0 && r.zone === 'incorrect';
-
-  const metaEl = document.getElementById('metaInline');
-  if(mode==='technique'){
-    metaEl.style.display = 'block';
-    metaEl.textContent = `intent: ${r.retrieval_metadata.intent} · strategy: ${r.retrieval_metadata.strategy} · candidates: ${r.retrieval_metadata.candidates} · latency_ms: ${r.retrieval_metadata.latency_ms}`;
-  } else {
-    metaEl.style.display = 'none';
-  }
 
   const tone = zoneTone(r.zone);
   const b = document.getElementById('verdictBanner');
@@ -554,7 +679,14 @@ function renderResponse(){
       </ul>
     </div>`;
   } else {
-    mainHTML += `<div class="answer-text">${buildAnswerHTML(r.answer, r.citations)}</div>`;
+    const {caveat, fallback} = splitCaveat(r.answer);
+    if(fallback){
+      mainHTML += `<div class="answer-fallback-label">réponse à vérifier</div>`;
+    }
+    mainHTML += `<div class="answer-text${fallback ? ' fallback' : ''}" id="answerTextEl"></div>`;
+    if(caveat){
+      mainHTML += `<div class="answer-caveat">${escapeHTML(caveat)}</div>`;
+    }
     mainHTML += `<div class="footnote-panel" id="footnotePanel"></div>`;
     if(mode!=='technique' && r.citations.length>0){
       mainHTML += `<details class="simple-sources"><summary>▸ Voir les sources (${r.citations.length})</summary>${r.citations.map(c=>`<div class="simple-source-row"><span class="support-badge ${supClass(c.support_level)}">${supLabel(c.support_level)}</span><span>${escapeHTML(c.document)}${c.section?' — '+escapeHTML(c.section):''}</span></div>`).join('')}</details>`;
@@ -569,41 +701,24 @@ function renderResponse(){
       });
       mainHTML += `</div>`;
     }
+    // Détail technique (intent/strategy/candidates/latency) puis bloc
+    // citations complet, dans cet ordre, juste entre la réponse et la fin
+    // de la carte — plus de rail latéral séparé (ancien citations-rail).
+    if(mode==='technique'){
+      mainHTML += technicalDetailsHTML(r);
+    }
   }
   main.innerHTML = mainHTML;
 
-  main.querySelectorAll('.cite').forEach(el=>{
-    el.addEventListener('click', ()=> onCiteClick(el.getAttribute('data-citation-id')));
-  });
-
-  const body = document.getElementById('responseBody');
-  const rail = document.getElementById('citationsRail');
-  if(abstain || mode!=='technique' || r.citations.length===0){
-    body.classList.add('rail-hidden');
-    rail.style.display='none';
-  } else {
-    body.classList.remove('rail-hidden');
-    rail.style.display='block';
-    renderRail(r);
+  if(!abstain){
+    const answerEl = document.getElementById('answerTextEl');
+    const {fallback, text} = splitCaveat(r.answer);
+    if(animate){
+      revealAnswerWordByWord(answerEl, text, ()=> finalizeAnswerHTML(answerEl, text, r.citations, fallback));
+    } else {
+      finalizeAnswerHTML(answerEl, text, r.citations, fallback);
+    }
   }
-}
-
-function renderRail(r){
-  const rail = document.getElementById('citationsRail');
-  let html = `<h3>Citations</h3><p class="rail-sub">${r.citations.length} passage(s) source, traçables ligne par ligne</p>`;
-  r.citations.forEach((c, idx)=>{
-    html += `<div class="rail-cite" id="rail-cite-${c.citation_id}">
-      <div class="rail-cite-head">
-        <span class="rail-cite-num">[${idx+1}]</span>
-        <span class="rail-cite-section">${escapeHTML(c.document)}${c.section?' — '+escapeHTML(c.section):''}</span>
-      </div>
-      <div class="rail-cite-loc">${c.page?`p. ${c.page} · `:''}${c.line?`l. ${c.line} · `:''}chunk ${escapeHTML(String(c.chunk_id).slice(0,8))}…</div>
-      <div class="rail-cite-excerpt">« ${escapeHTML(c.text_span)} »</div>
-      <span class="support-badge ${supClass(c.support_level)}">${c.support_level}</span>
-    </div>`;
-  });
-  html += `<div class="rail-trace">intent      : ${escapeHTML(r.retrieval_metadata.intent||'')}\nstrategy    : ${escapeHTML(r.retrieval_metadata.strategy||'')}\ncandidates  : ${r.retrieval_metadata.candidates}\nlatency_ms  : ${r.retrieval_metadata.latency_ms}</div>`;
-  rail.innerHTML = html;
 }
 
 function onCiteClick(citationId){
@@ -621,6 +736,42 @@ function onCiteClick(citationId){
     `;
     panel.classList.add('show');
     panel.querySelector('.fn-close').addEventListener('click', ()=> panel.classList.remove('show'));
+  }
+}
+
+/* ---- /ingest/upload ---- */
+async function launchUpload(){
+  const sourceId = document.getElementById('uploadSourceId').value.trim();
+  const fileInput = document.getElementById('uploadFile');
+  const file = fileInput.files[0];
+  if(!sourceId){ alert('source_id requis (nom du dossier sous raw/).'); return; }
+  if(!file){ alert('Choisissez un fichier à uploader.'); return; }
+
+  const btn = document.getElementById('uploadBtn');
+  btn.disabled = true;
+  const list = document.getElementById('jobList');
+  const card = document.createElement('div');
+  card.className = 'job-card';
+  list.prepend(card);
+
+  try{
+    const form = new FormData();
+    form.append('file', file);
+    form.append('source_id', sourceId);
+    const resp = await fetch('/ingest/upload', { method:'POST', body: form });
+    if(!resp.ok){
+      const errText = await resp.text();
+      throw new Error(`HTTP ${resp.status} — ${errText.slice(0,300)}`);
+    }
+    const data = await resp.json();
+    card.innerHTML = `<div class="job-status queued">queued</div><div>POST /ingest/upload — raw/<code>${escapeHTML(sourceId)}</code>/<code>${escapeHTML(file.name)}</code></div><div style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);margin-top:4px;">job_id: ${escapeHTML(data.job_id)}</div>`;
+    pollJob(data.job_id, card);
+    fileInput.value = '';
+    document.getElementById('uploadSourceId').value = '';
+  }catch(e){
+    card.innerHTML = `<div class="job-status failed">failed</div><div style="color:var(--bad);font-family:var(--font-mono);font-size:11px;">${escapeHTML(e.message)}</div>`;
+  }finally{
+    btn.disabled = false;
   }
 }
 
@@ -704,8 +855,13 @@ document.querySelectorAll('.sidebar-tab').forEach(tab=>{
   });
 });
 document.getElementById('ingestBtn').addEventListener('click', launchIngest);
+document.getElementById('uploadBtn').addEventListener('click', launchUpload);
 document.getElementById('toggleSidebar').addEventListener('click', ()=> document.getElementById('sidebar').classList.toggle('show'));
+document.getElementById('themeToggle').addEventListener('click', ()=>{
+  setTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light');
+});
 
+initTheme();
 renderRecent();
 renderHistory();
 refreshHealth();
