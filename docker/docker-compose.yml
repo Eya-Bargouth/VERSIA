@@ -48,6 +48,15 @@ services:
     environment:
       - QDRANT_HOST=trade-qdrant
       - QDRANT_PORT=6333
+      # trade-redis n'est pas déclaré dans ce compose (démarré séparément),
+      # mais rejoint le même réseau docker_default — joignable par nom.
+      # Sans ceci, QueryCache tentait localhost:6379, qui à l'intérieur du
+      # conteneur pointe sur lui-même, jamais sur trade-redis : le cache
+      # était donc silencieusement désactivé pour toute requête passée par
+      # ce conteneur (dégradation par conception, voir src/api/cache.py) —
+      # constaté en conditions réelles (connexion refusée systématique).
+      - REDIS_HOST=trade-redis
+      - REDIS_PORT=6379
       - LLM_BASE_URL=http://trade-ollama:11434
       - LLM_PROVIDER=ollama
       - LLM_MODEL=qwen2.5:3b-instruct
@@ -65,8 +74,17 @@ services:
       - ../src:/app/src:ro
       - ../tests:/app/tests:ro
       - ../scripts:/app/scripts:ro
-      - ../raw:/app/raw:ro
+      # Écrit en rw (pas :ro) depuis l'ajout de POST /ingest/upload — seul
+      # écrivain de raw/ dans tout le projet, action utilisateur explicite
+      # via l'UI (voir CLAUDE.md, invariant "raw/ lecture seule").
+      - ../raw:/app/raw
       - ../data/diffs:/app/data/diffs:ro
+      # Cache HuggingFace de l'hôte, réutilisé tel quel (:ro — le conteneur
+      # ne doit jamais y écrire) : sans ce montage, chaque recreate du
+      # conteneur repartait d'un cache vide et retéléchargeait ~8GB
+      # (BGE-M3 + reranker) alors que ces poids sont déjà présents côté
+      # hôte (utilisés par tous les scripts de diagnostic de cette session).
+      - C:/Users/USER/.cache/huggingface:/root/.cache/huggingface:ro
     deploy:
       resources:
         reservations:
