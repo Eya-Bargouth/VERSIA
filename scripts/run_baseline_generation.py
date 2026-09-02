@@ -25,6 +25,7 @@ Usage : --limit N pour un run partiel (smoke test avant le run complet).
 import argparse
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -59,8 +60,6 @@ from src.reliability.sufficiency import SufficiencyChecker
 from src.retrieval.hybrid_retriever import HybridRetriever
 
 QUESTIONS_PATH = _PROJECT_ROOT / "data" / "eval" / "questions_v1.jsonl"
-OUT_PATH = _PROJECT_ROOT / "data" / "eval" / "baseline_D_E_F_results.json"
-RAW_OUT_PATH = _PROJECT_ROOT / "data" / "eval" / "baseline_D_E_F_raw.jsonl"
 
 CONFLICT_SUFFICIENCY_THRESHOLD = 0.7
 RETRY_MAX_ATTEMPTS = 2  # timeout Ollama / échec de validation JSON du juge sont transitoires
@@ -151,16 +150,29 @@ def run_one_question(components: dict, q: dict) -> dict:
     settings = get_settings()
 
     t0 = time.perf_counter()
+    t_retrieval_0 = time.perf_counter()
     retrieval = retriever.retrieve(
         query=q["question"], top_k=10, k_dense=settings.retrieval_k_dense, k_sparse=settings.retrieval_k_sparse
     )
+    retrieval_latency_ms = (time.perf_counter() - t_retrieval_0) * 1000
     chunks = retrieval["results"]
 
     diff_explanation = QueryPipeline._diff_explanation(retrieval)
+    # Même fix que QueryPipeline._narrow_chunks_for_generation (priorité 3) :
+    # ne transmet au générateur que les chunks du hierarchy_path ciblé pour
+    # les questions comparatives, pas le pool top-10 mélangé — le sufficiency
+    # checker, lui, continue de recevoir le pool complet.
+    generation_chunks = QueryPipeline._narrow_chunks_for_generation(chunks, retrieval)
+
+    t_sufficiency_0 = time.perf_counter()
     sufficiency = components["sufficiency_checker"].check(
         q["question"], chunks, components["judge_config"], diff_explanation=diff_explanation
     )
-    generation = components["generator"].generate(q["question"], chunks, diff_explanation=diff_explanation)
+    sufficiency_latency_ms = (time.perf_counter() - t_sufficiency_0) * 1000
+
+    t_generation_0 = time.perf_counter()
+    generation = components["generator"].generate(q["question"], generation_chunks, diff_explanation=diff_explanation)
+    generation_latency_ms = (time.perf_counter() - t_generation_0) * 1000
 
     # Ce script réimplémente sa propre chaîne retrieve->sufficiency->generate->
     # conflict (pour capturer séparément la génération brute et finale depuis
@@ -169,18 +181,31 @@ def run_one_question(components: dict, q: dict) -> dict:
     # (audit #12) : detect_structural (gratuit, déterministe, simple lecture
     # d'un diff précalculé) ne dépend plus du seuil de suffisance, qui ne gate
     # plus que detect_textual (coûteux, LLM).
+    t_conflict_0 = time.perf_counter()
     conflicts = []
     diff_report = retrieval.get("diff_report")
     if diff_report:
+        # Même fix que QueryPipeline._detect_conflicts (audit #13) :
+        # restreint au(x) hierarchy_path réellement ciblé(s) par la question
+        # (priorité au nœud Change trouvé par recherche sémantique, repli sur
+        # les hierarchy_path retrouvés — voir _target_hierarchy_paths),
+        # sinon `explanation` dumpe tout le diff (voir version_diff_engine.py
+        # ::detect docstring). Calcul partagé avec QueryPipeline pour éviter
+        # toute divergence entre ce script et la prod.
         structural = components["conflict_detector"].detect_structural(
-            diff_report["source_id"], diff_report["version_from"], diff_report["version_to"]
+            diff_report["source_id"],
+            diff_report["version_from"],
+            diff_report["version_to"],
+            hierarchy_paths=QueryPipeline._target_hierarchy_paths(retrieval),
         )
         if structural.conflict:
             conflicts.append(structural)
 
     if sufficiency.verdict != "insufficient" and sufficiency.confidence >= CONFLICT_SUFFICIENCY_THRESHOLD:
         conflicts.extend(components["conflict_detector"].detect_textual(chunks, gen_config))
+    conflict_latency_ms = (time.perf_counter() - t_conflict_0) * 1000
 
+    t_abstention_0 = time.perf_counter()
     reranker_scores = [c.get("rerank_score", c.get("score", 0.0)) for c in chunks]
     decision = components["abstention_gate"].evaluate(
         reranker_scores=reranker_scores,
@@ -189,6 +214,7 @@ def run_one_question(components: dict, q: dict) -> dict:
         planner_confidence=retrieval.get("confidence"),
     )
     final_answer, final_citations = QueryPipeline._finalize_answer(decision, generation)
+    abstention_latency_ms = (time.perf_counter() - t_abstention_0) * 1000
     latency_ms = (time.perf_counter() - t0) * 1000
 
     # diff_explanation inclus : c'est une partie réelle du contexte que le
@@ -196,7 +222,13 @@ def run_one_question(components: dict, q: dict) -> dict:
     # affirmation sourcée depuis le diff plutôt qu'un chunk brut était jugée
     # "non supportée" par erreur (mesuré : Faithfulness 0.13 sur
     # version_conflict vs 0.61 sur factual, largement artificiel).
-    context_text = "\n---\n".join(c.get("text", "") for c in chunks)
+    #
+    # Construit depuis generation_chunks (pas chunks) depuis la priorité 3 :
+    # faithfulness doit juger l'ancrage de la réponse dans ce que le
+    # générateur a RÉELLEMENT reçu — utiliser le pool complet risquerait de
+    # faire "matcher" une affirmation avec un chunk non transmis au
+    # générateur, gonflant artificiellement le score.
+    context_text = "\n---\n".join(c.get("text", "") for c in generation_chunks)
     if diff_explanation:
         context_text += "\n---\n" + diff_explanation
     # Les 10 chunks réellement utilisés pour la génération, pas seulement les
@@ -258,6 +290,18 @@ def run_one_question(components: dict, q: dict) -> dict:
         "citation_accuracy": cit_accuracy["citation_accuracy"],
         "should_abstain": q["category"] == "abstention",
         "latency_ms": latency_ms,
+        # Détail par étape du pipeline réel (hors appels juges RAGAS, qui ne
+        # font pas partie du chemin de production) — retrieval inclut
+        # embedding + recherche hybride + reranking + (pour comparative)
+        # recherche des nœuds Change et complétion des paires de versions ;
+        # generation est le seul segment resserré par la priorité 3.
+        "latency_detail_ms": {
+            "retrieval": retrieval_latency_ms,
+            "sufficiency": sufficiency_latency_ms,
+            "generation": generation_latency_ms,
+            "conflict_detection": conflict_latency_ms,
+            "abstention": abstention_latency_ms,
+        },
     }
 
 
@@ -282,7 +326,45 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=None, help="Nombre de questions à traiter (smoke test)")
     parser.add_argument("--questions-path", type=Path, default=None, help="Fichier de questions alternatif (JSONL)")
+    parser.add_argument(
+        "--out-prefix", type=str, default="baseline_D_E_F",
+        help="Préfixe des fichiers de sortie (data/eval/<prefix>_raw.jsonl, <prefix>_results.json) — "
+             "distinct de la valeur par défaut pour ne pas écraser les fichiers canoniques lors d'un run ciblé.",
+    )
+    parser.add_argument(
+        "--redis-key-prefix", type=str, default=None,
+        help="Si fourni, sauvegarde chaque question (et le résumé final) dans Redis sous <prefix>:qNN / <prefix>:summary, "
+             "au fur et à mesure — pas seulement à la fin du run.",
+    )
     args = parser.parse_args()
+
+    out_path = _PROJECT_ROOT / "data" / "eval" / f"{args.out_prefix}_results.json"
+    raw_out_path = _PROJECT_ROOT / "data" / "eval" / f"{args.out_prefix}_raw.jsonl"
+
+    redis_save = None
+    if args.redis_key_prefix:
+        # Le paquet Python `redis` n'est pas installé dans l'environnement qui
+        # exécute ce script (constaté : ModuleNotFoundError) — on passe par
+        # `docker exec ... redis-cli -x SET`, déjà utilisé dans cette session
+        # pour manipuler le cache Redis, plutôt que d'ajouter une dépendance.
+        #
+        # Best-effort volontaire : le JSONL (raw_f, déjà flush() avant chaque
+        # appel) reste la source de vérité de ce script. Un échec Redis
+        # (constaté en conditions réelles : `docker exec` a échoué une fois
+        # sans raison reproductible, cause probable = contention sous charge
+        # Ollama soutenue) ne doit jamais faire perdre tout le run — d'où le
+        # try/except ici, plutôt qu'un `check=True` qui remonterait jusqu'à
+        # main() et arrêterait le traitement des questions restantes.
+        def redis_save(key: str, value: str) -> None:
+            try:
+                subprocess.run(
+                    ["docker", "exec", "-i", "trade-redis", "redis-cli", "-x", "SET", key],
+                    input=value.encode("utf-8"), check=True, capture_output=True,
+                )
+            except Exception as exc:
+                stderr = exc.stderr.decode("utf-8", errors="replace") if hasattr(exc, "stderr") and exc.stderr else str(exc)
+                print(f"  -> AVERTISSEMENT : échec sauvegarde Redis pour '{key}' ({stderr.strip()}), ignoré")
+        subprocess.run(["docker", "exec", "trade-redis", "redis-cli", "PING"], check=True, stdout=subprocess.DEVNULL)
 
     questions_path = args.questions_path or QUESTIONS_PATH
     questions = [json.loads(line) for line in questions_path.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -293,8 +375,8 @@ def main():
     components = build_components()
 
     records = []
-    RAW_OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(RAW_OUT_PATH, "w", encoding="utf-8") as raw_f:
+    raw_out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(raw_out_path, "w", encoding="utf-8") as raw_f:
         for i, q in enumerate(questions, 1):
             t0 = time.perf_counter()
             try:
@@ -306,16 +388,23 @@ def main():
                 # aucune trace exploitable pour diagnostiquer sa cause réelle
                 # après coup (constaté sur les 19/50 questions perdues de
                 # l'évaluation précédente — cause jamais reconstituable).
-                raw_f.write(json.dumps(
-                    {"question": q["question"], "category": q.get("category"),
-                     "error": f"{type(exc).__name__}: {exc}", "attempts": RETRY_MAX_ATTEMPTS},
-                    ensure_ascii=False,
-                ) + "\n")
+                error_record = {"question": q["question"], "category": q.get("category"),
+                                 "error": f"{type(exc).__name__}: {exc}", "attempts": RETRY_MAX_ATTEMPTS}
+                raw_f.write(json.dumps(error_record, ensure_ascii=False) + "\n")
                 raw_f.flush()
+                if redis_save is not None:
+                    redis_save(f"{args.redis_key_prefix}:q{i:02d}", json.dumps(error_record, ensure_ascii=False))
                 continue
             records.append(record)
             raw_f.write(json.dumps(record, ensure_ascii=False) + "\n")
             raw_f.flush()
+            # Sauvegarde Redis question par question, avant de passer à la
+            # suivante — pas seulement en fin de run (une question déjà
+            # traitée ne doit jamais dépendre du bon déroulement des
+            # suivantes pour être récupérable, cf. pertes constatées plus tôt
+            # dans la session sur des runs interrompus).
+            if redis_save is not None:
+                redis_save(f"{args.redis_key_prefix}:q{i:02d}", json.dumps(record, ensure_ascii=False))
             dt = time.perf_counter() - t0
             print(f"[{i}/{len(questions)}] ({dt:.1f}s) {q['category']:<18} zone={record['zone']:<10} "
                   f"faith={record['faithfulness']:.2f} conflicts={record['n_conflicts']} -> {q['question'][:70]}")
@@ -323,6 +412,10 @@ def main():
     # ---- Agrégation par baseline ----
     def avg(key, subset=None):
         vals = [r[key] for r in (subset or records) if r.get(key) is not None]
+        return sum(vals) / len(vals) if vals else None
+
+    def avg_of(vals):
+        vals = [v for v in vals if v is not None]
         return sum(vals) / len(vals) if vals else None
 
     # Hallucination Rate — objets simplifiés compatibles avec le protocole attendu.
@@ -379,20 +472,33 @@ def main():
         "n_version_conflict_questions": len(version_conflict_qs),
     }
 
+    latency_avg_detail = {
+        stage: avg_of([r["latency_detail_ms"][stage] for r in records])
+        for stage in ("retrieval", "sufficiency", "generation", "conflict_detection", "abstention")
+    } if records else {}
+
     results = {
         "D_generation_citations_sufficiency": baseline_d,
         "E_plus_abstention": baseline_e,
         "F_plus_conflict_detection": baseline_f,
+        "latency_ms": {
+            "avg_total": avg("latency_ms"),
+            "avg_by_stage": latency_avg_detail,
+        },
         "_meta": {"n_questions": len(records), "n_requested": len(questions)},
     }
 
-    with open(OUT_PATH, "w", encoding="utf-8") as f:
+    with open(out_path, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
 
     print("\n=== Résumé ===")
     print(json.dumps(results, indent=2, ensure_ascii=False))
-    print(f"\nRésultats agrégés : {OUT_PATH}")
-    print(f"Détail par question : {RAW_OUT_PATH}")
+    print(f"\nRésultats agrégés : {out_path}")
+    print(f"Détail par question : {raw_out_path}")
+
+    if redis_save is not None:
+        redis_save(f"{args.redis_key_prefix}:summary", json.dumps(results, ensure_ascii=False))
+        print(f"Sauvegardé dans Redis sous {args.redis_key_prefix}:q01..q{len(records):02d} + {args.redis_key_prefix}:summary")
 
 
 if __name__ == "__main__":
