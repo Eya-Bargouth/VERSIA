@@ -144,6 +144,36 @@ class Settings(BaseSettings):
 
         logger.info("startup_validation_success")
 
+    def check_services(self) -> dict:
+        """Ping non-bloquant de Qdrant et du provider LLM pour GET /health
+        (src/api/routes/health.py) — même logique de ping que
+        validate_startup() (appelée au démarrage, elle, lève une exception),
+        mais renvoie un statut par service au lieu d'arrêter le process.
+        Référencée depuis health.py mais jamais implémentée jusqu'ici
+        (AttributeError à chaque appel, expliquant le label "unhealthy"
+        constaté sur le conteneur tout au long de la session)."""
+        services: dict[str, str] = {}
+
+        try:
+            resp = httpx.get(f"http://{self.qdrant_host}:{self.qdrant_port}/healthz", timeout=5.0)
+            services["qdrant"] = "ok" if resp.status_code == 200 else f"HTTP {resp.status_code}"
+        except Exception as exc:
+            services["qdrant"] = f"unreachable: {exc}"
+
+        try:
+            if self.llm_provider == "ollama":
+                resp = httpx.get(f"{self.llm_base_url}/api/tags", timeout=5.0)
+                services["llm"] = "ok" if resp.status_code == 200 else f"HTTP {resp.status_code}"
+            elif self.llm_provider == "vllm":
+                resp = httpx.get(f"{self.llm_base_url}/health", timeout=5.0)
+                services["llm"] = "ok" if resp.status_code == 200 else f"HTTP {resp.status_code}"
+            else:
+                services["llm"] = f"unknown provider: {self.llm_provider}"
+        except Exception as exc:
+            services["llm"] = f"unreachable: {exc}"
+
+        return services
+
 
 # Instance globale (lazy)
 _settings: Settings | None = None
