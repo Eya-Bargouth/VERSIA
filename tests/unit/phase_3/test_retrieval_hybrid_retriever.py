@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 
 from src.embeddings.vector_store import RetrievalResult
+from src.ingestion.version_diff import DiffReport
 from src.retrieval.hybrid_retriever import HybridRetriever
 
 pytestmark = pytest.mark.phase3
@@ -372,3 +373,189 @@ class TestSiblingExpansion:
         )
 
         assert len(result["results"]) == 1
+
+
+class _FakeStoreWithVersionCounterparts:
+    """Store minimal exposant seulement get_by_hierarchy_path, pour tester
+    _complete_version_pairs sans vrai Qdrant."""
+
+    def __init__(self, payload_by_key: dict):
+        self.payload_by_key = payload_by_key
+        self.calls: list[tuple] = []
+
+    def get_by_hierarchy_path(self, hierarchy_path, source_id=None, version_tag=None, limit=5):
+        self.calls.append((hierarchy_path, source_id, version_tag))
+        payload = self.payload_by_key.get((hierarchy_path, source_id, version_tag))
+        return [payload] if payload else []
+
+
+class TestVersionPairCompletion:
+    """Question comparative (diff_report chargé) : si un candidat retrouvé
+    n'a que l'un des deux côtés de la comparaison, l'autre côté doit être
+    complété directement — cas réel mesuré : context_precision=0.0
+    récurrent sur version_conflict, faute d'avoir les deux versions dans le
+    contexte transmis au générateur."""
+
+    def _diff_report(self) -> DiffReport:
+        return DiffReport(source_id="plaid", version_from="1.19.5-beta", version_to="1.20.6", changes=[])
+
+    def test_missing_counterpart_is_fetched_and_added(self):
+        candidates = [
+            {
+                "chunk_id": "a",
+                "score": 0.8,
+                "text": "old description",
+                "payload": {"hierarchy_path": "schemas.Item.field", "source_id": "plaid", "version_tag": "1.19.5-beta"},
+            }
+        ]
+        counterpart_payload = {
+            "chunk_id": "b",
+            "text": "new description",
+            "hierarchy_path": "schemas.Item.field",
+            "source_id": "plaid",
+            "version_tag": "1.20.6",
+        }
+        fake_store = _FakeStoreWithVersionCounterparts({
+            ("schemas.Item.field", "plaid", "1.20.6"): counterpart_payload,
+        })
+        retriever = HybridRetriever(store=fake_store, use_reranker=False)
+
+        result = retriever._complete_version_pairs(candidates, self._diff_report())
+
+        chunk_ids = {c["chunk_id"] for c in result}
+        assert chunk_ids == {"a", "b"}
+        added = next(c for c in result if c["chunk_id"] == "b")
+        assert added["score"] == 0.0
+        assert fake_store.calls == [("schemas.Item.field", "plaid", "1.20.6")]
+
+    def test_both_sides_already_present_no_fetch(self):
+        candidates = [
+            {"chunk_id": "a", "score": 0.8, "text": "old", "payload": {"hierarchy_path": "p", "source_id": "plaid", "version_tag": "1.19.5-beta"}},
+            {"chunk_id": "b", "score": 0.7, "text": "new", "payload": {"hierarchy_path": "p", "source_id": "plaid", "version_tag": "1.20.6"}},
+        ]
+        fake_store = _FakeStoreWithVersionCounterparts({})
+        retriever = HybridRetriever(store=fake_store, use_reranker=False)
+
+        result = retriever._complete_version_pairs(candidates, self._diff_report())
+
+        assert len(result) == 2
+        assert fake_store.calls == []
+
+    def test_candidate_outside_version_pair_ignored(self):
+        """Un chunk d'une version non concernée par CE diff (ex. 1.5.0-beta,
+        ni version_from ni version_to) ne doit déclencher aucune recherche."""
+        candidates = [
+            {"chunk_id": "a", "score": 0.8, "text": "x", "payload": {"hierarchy_path": "p", "source_id": "plaid", "version_tag": "1.5.0-beta"}},
+        ]
+        fake_store = _FakeStoreWithVersionCounterparts({})
+        retriever = HybridRetriever(store=fake_store, use_reranker=False)
+
+        result = retriever._complete_version_pairs(candidates, self._diff_report())
+
+        assert len(result) == 1
+        assert fake_store.calls == []
+
+    def test_no_store_returns_candidates_unchanged(self):
+        candidates = [
+            {"chunk_id": "a", "score": 0.8, "text": "x", "payload": {"hierarchy_path": "p", "source_id": "plaid", "version_tag": "1.19.5-beta"}},
+        ]
+        retriever = HybridRetriever(store=None, use_reranker=False)
+
+        result = retriever._complete_version_pairs(candidates, self._diff_report())
+
+        assert result == candidates
+
+
+class _FakeStoreWithChangeSearch:
+    """Store minimal exposant search_change_nodes + get_by_hierarchy_path,
+    pour tester _search_relevant_changes/_fetch_content_for_changes sans
+    vrai Qdrant."""
+
+    def __init__(self, change_hits: list, content_by_key: dict | None = None):
+        self.change_hits = change_hits
+        self.content_by_key = content_by_key or {}
+        self.search_calls: list = []
+        self.fetch_calls: list = []
+
+    def search_change_nodes(self, query_embedding, source_id, version_from, version_to, k=10):
+        self.search_calls.append((source_id, version_from, version_to, k))
+        return self.change_hits
+
+    def get_by_hierarchy_path(self, hierarchy_path, source_id=None, version_tag=None, limit=5):
+        self.fetch_calls.append((hierarchy_path, source_id, version_tag))
+        payload = self.content_by_key.get((hierarchy_path, source_id, version_tag))
+        return [payload] if payload else []
+
+
+class _FakeChangeHit:
+    def __init__(self, payload):
+        self.payload = payload
+
+
+class TestChangeNodeRetrieval:
+    """Recherche sémantique sur les nœuds Change (VersionRAG §4.2) : une
+    fois le couple de versions résolu, la question en langage naturel est
+    comparée aux descriptions de changements indexées plutôt qu'un simple
+    matching de tags — puis le contenu des deux côtés est récupéré
+    directement par hierarchy_path, sans dépendre du hasard du retrieval
+    vectoriel générique."""
+
+    def _diff_report(self):
+        return DiffReport(source_id="plaid", version_from="1.19.5-beta", version_to="1.20.6", changes=[])
+
+    def test_search_relevant_changes_delegates_to_store(self):
+        hits = [_FakeChangeHit({"hierarchy_path": "schemas.Item.field"})]
+        fake_store = _FakeStoreWithChangeSearch(hits)
+        retriever = HybridRetriever(store=fake_store, use_reranker=False)
+
+        result = retriever._search_relevant_changes(np.zeros(1024, dtype=np.float32), self._diff_report())
+
+        assert result == hits
+        assert fake_store.search_calls == [("plaid", "1.19.5-beta", "1.20.6", 5)]
+
+    def test_search_relevant_changes_no_store_returns_empty(self):
+        retriever = HybridRetriever(store=None, use_reranker=False)
+        result = retriever._search_relevant_changes(np.zeros(1024, dtype=np.float32), self._diff_report())
+        assert result == []
+
+    def test_search_relevant_changes_store_error_degrades_gracefully(self):
+        class _BrokenStore:
+            def search_change_nodes(self, *a, **k):
+                raise RuntimeError("qdrant down")
+
+        retriever = HybridRetriever(store=_BrokenStore(), use_reranker=False)
+        result = retriever._search_relevant_changes(np.zeros(1024, dtype=np.float32), self._diff_report())
+        assert result == []
+
+    def test_fetch_content_for_changes_adds_both_versions(self):
+        hits = [_FakeChangeHit({"hierarchy_path": "schemas.Item.field"})]
+        content = {
+            ("schemas.Item.field", "plaid", "1.19.5-beta"): {"chunk_id": "old", "text": "old text"},
+            ("schemas.Item.field", "plaid", "1.20.6"): {"chunk_id": "new", "text": "new text"},
+        }
+        fake_store = _FakeStoreWithChangeSearch(hits, content)
+        retriever = HybridRetriever(store=fake_store, use_reranker=False)
+
+        result = retriever._fetch_content_for_changes([], hits, self._diff_report())
+
+        chunk_ids = {c["chunk_id"] for c in result}
+        assert chunk_ids == {"old", "new"}
+        assert all(c["score"] == 0.0 for c in result)
+
+    def test_fetch_content_for_changes_skips_already_present(self):
+        hits = [_FakeChangeHit({"hierarchy_path": "schemas.Item.field"})]
+        content = {("schemas.Item.field", "plaid", "1.20.6"): {"chunk_id": "new", "text": "new text"}}
+        fake_store = _FakeStoreWithChangeSearch(hits, content)
+        retriever = HybridRetriever(store=fake_store, use_reranker=False)
+        existing = [{"chunk_id": "old", "score": 0.5, "text": "already here", "payload": {}}]
+
+        result = retriever._fetch_content_for_changes(existing, hits, self._diff_report())
+
+        assert len(result) == 2
+        assert {c["chunk_id"] for c in result} == {"old", "new"}
+
+    def test_fetch_content_for_changes_no_hits_returns_candidates_unchanged(self):
+        retriever = HybridRetriever(store=_FakeStoreWithChangeSearch([]), use_reranker=False)
+        candidates = [{"chunk_id": "a", "score": 0.5, "text": "x", "payload": {}}]
+        result = retriever._fetch_content_for_changes(candidates, [], self._diff_report())
+        assert result == candidates
