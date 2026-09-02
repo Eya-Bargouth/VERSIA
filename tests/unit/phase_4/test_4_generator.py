@@ -272,3 +272,31 @@ class TestGenerator:
         gen.generate("Q", [chunk])
 
         assert len(client.calls) == 2
+
+
+class TestGeneratorDiffTemperature:
+    """Température=0 pour diff_explanation testée puis abandonnée : elle
+    rendait une sortie JSON cassée reproductible à l'identique à chaque
+    tentative, annulant le bénéfice du retry (voir generate() docstring).
+    La température configurée doit rester inchangée, avec ou sans
+    diff_explanation."""
+
+    def test_temperature_untouched_with_diff_explanation(self, sample_chunk):
+        chunk_id, chunk = sample_chunk
+        content = '{"answer": "changed", "citations": [], "confidence": 0.9, "sufficiency_score": 0.9}'
+        client = _FakeLLMClient(content)
+        gen = Generator(client, LLMConfig(provider="ollama", model="qwen2.5:3b-instruct", temperature=0.7))
+
+        gen.generate("What changed?", [chunk], diff_explanation="Changements entre v1 et v2:\n- x: modifié")
+
+        assert client.last_config.temperature == 0.7
+
+    def test_temperature_untouched_without_diff_explanation(self, sample_chunk):
+        chunk_id, chunk = sample_chunk
+        content = '{"answer": "symbol is required", "citations": [], "confidence": 0.9, "sufficiency_score": 0.9}'
+        client = _FakeLLMClient(content)
+        gen = Generator(client, LLMConfig(provider="ollama", model="qwen2.5:3b-instruct", temperature=0.7))
+
+        gen.generate("What parameter is required?", [chunk])
+
+        assert client.last_config.temperature == 0.7
