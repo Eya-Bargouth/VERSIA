@@ -10,6 +10,17 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.111.0",
     "uvicorn[standard]>=0.30.0",
+    # Requis par FastAPI pour tout endpoint Form()/File() (voir POST
+    # /ingest/upload, src/api/routes/ingest.py) — sans lui, l'import du
+    # module lève RuntimeError au démarrage, pas seulement à l'appel.
+    "python-multipart>=0.0.9",
+    # Cache Redis de POST /query (src/api/cache.py) — absent de pyproject.toml
+    # jusqu'ici alors qu'il est importé sans garde ; l'image Docker
+    # fonctionnait quand même car `redis` avait été installé manuellement
+    # dans le conteneur à un moment de la session (jamais déclaré), masquant
+    # ce trou jusqu'à un rebuild propre (constaté en conditions réelles :
+    # ModuleNotFoundError sur une image fraîchement reconstruite).
+    "redis>=5.0.0",
     "pydantic>=2.7.0",
     "pydantic-settings>=2.3.0",
     "qdrant-client>=1.9.0",
