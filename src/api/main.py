@@ -34,7 +34,7 @@ async def lifespan(app: FastAPI):
     logger.info("api_shutdown")
 
 
-app = FastAPI(title="TRADE API", version="2.1.0", lifespan=lifespan)
+app = FastAPI(title="VERSIA API", version="2.1.0", lifespan=lifespan)
 app.include_router(query_router)
 app.include_router(health_router)
 app.include_router(ingest_router)
