@@ -39,11 +39,13 @@ env/
 # Data
 qdrant_storage/
 ollama_data/
-raw/
 !tests/fixtures/
 data/cache/
 
-docs/
+# Résultats de mesure — régénérables par scripts/run_baseline_*.py
+data/eval/baseline_*
+data/eval/abstention_calibration_*
+
 
 # Logs
 *.log
