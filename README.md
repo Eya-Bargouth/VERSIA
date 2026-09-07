@@ -1,4 +1,4 @@
-# TRADE — RAG hybride pour documentation technique versionnée
+# VERSIA — RAG hybride pour documentation technique versionnée
 
 Système de questions-réponses basé sur un LLM couplé à un RAG hybride (dense + sparse), 100 % local (Ollama/vLLM, aucune API payante), conçu pour de la documentation technique hétérogène et versionnée (specs API, guides, réglementation...).
 
