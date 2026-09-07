@@ -3,11 +3,6 @@
 abstain (spec §8). Point d'entrée unique que la Phase 6 (route API /query)
 appellera, plutôt que de réinventer cet enchaînement dans le code FastAPI.
 
-Décision actée avec l'utilisateur (2026-08-08) : la détection de conflits
-textuels (coûteuse — plusieurs appels LLM par paire cross-source) ne se
-déclenche que si SufficiencyChecker juge le contexte suffisant au-delà d'un
-seuil configurable — inutile de chercher des conflits sur une question dont
-la réponse va de toute façon être une abstention.
 """
 
 from typing import Literal

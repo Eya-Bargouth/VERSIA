@@ -3,8 +3,7 @@
 template, depuis les vraies données du corpus (specs OpenAPI découvertes
 automatiquement sous raw/, data/diffs/*.json), sans écriture manuelle.
 
-Générique par construction (voir CLAUDE.md — couplage au format, jamais à la
-sémantique d'un corpus donné) : les sources sont découvertes via
+Générique par construction : les sources sont découvertes via
 `discover_sources` (comme `generate_version_diffs.py`), pas codées en dur.
 Une source "factuelle" est repérée par sa FORME (un spec REST-like : clé
 `paths` de type dict au niveau racine), pas par son nom. Ajouter/retirer une

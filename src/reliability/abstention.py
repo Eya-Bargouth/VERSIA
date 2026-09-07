@@ -1,38 +1,5 @@
 """AbstentionGate — 3 seuils CRAG-like (spec §8 "Détails abstention CRAG-like").
 
-`threshold_low=0.25` calibré (2026-08-14) sur données réelles : 49 questions
-uniques passées par le vrai pipeline (Qdrant + BGE-M3 + reranker + Ollama),
-39 in-corpus (`data/eval/questions_v1.jsonl`, hors catégorie "abstention",
-ne devraient pas être abstenues) + 10 hors-corpus (catégorie "abstention",
-même contenu que `data/eval/questions_abstention.jsonl`, abstention
-attendue). Attention : `questions_v1.jsonl` contient déjà ces 10 questions
-d'abstention (category="abstention") — un premier passage de calibration les
-avait chargées deux fois, une fois mal étiquetées `should_abstain=False`
-depuis questions_v1.jsonl et une fois correctement `True` depuis
-questions_abstention.jsonl, biaisant le calcul ; corrigé (déduplication +
-exclusion explicite, voir `scripts/calibrate_abstention_thresholds.py`).
-Balayage hors-ligne de threshold_low sur les combined_score réels obtenus
-(voir `data/eval/abstention_calibration_raw.jsonl`) : 0.25 retenu comme
-compromis (8% faux-positifs d'abstention sur les questions in-corpus, 40%
-d'abstention correcte sur les questions hors-corpus, 82% d'exactitude
-globale) plutôt que le seuil qui maximise l'exactitude brute (0.10 →
-seulement 10% d'abstention correcte, le mécanisme devient quasi inutile
-car la classe in-corpus domine numériquement le calcul d'exactitude —
-décision actée avec l'utilisateur, qui a tranché entre plusieurs points
-d'équilibre mesurés).
-
-`threshold_high=0.7` reste NON calibré empiriquement : la vérité terrain
-disponible (should_abstain binaire) ne permet de valider que la frontière
-abstain/non-abstain, pas la frontière correct/ambiguous qu'il contrôle —
-calibration à refaire si un jeu de données gradué (pas seulement binaire)
-devient disponible.
-
-Note sur `reranker_scores` : `Reranker.rerank()` utilise
-`model.compute_score(..., normalize=True)` (sigmoïde, sortie dans [0,1]) sur
-le chemin BGE-Reranker réel — mais son repli heuristique (pas de GPU/torch)
-retourne un score composite non borné (score de retrieval brut + bonus). Les
-scores sont donc bornés défensivement ici (`min(1.0, max(0.0, s))`), mais le
-signal est moins fiable quand le repli heuristique est actif.
 """
 
 from typing import Literal

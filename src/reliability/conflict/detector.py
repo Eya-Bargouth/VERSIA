@@ -2,15 +2,8 @@
 
 Combine :
 - conflits structurels : VersionDiffConflictDetector (déterministe, spec §8a)
-- conflits textuels : LLMFallbackDetector (spec §8b, décision du 2026-08-06 —
-  pas de NLI dédié pour l'instant)
+- conflits textuels : LLMFallbackDetector
 
-Les paires candidates pour les conflits textuels sont toutes les paires de
-chunks de `source_id` différents parmi les chunks déjà retrouvés pour une
-question donnée (spec §8b étape 1 : "même sujet, sources différentes") — le
-"même sujet" est déjà garanti par construction puisque tous les chunks
-proviennent du retrieval pour la même question, sans qu'il faille une étape
-de similarité sémantique séparée.
 """
 
 from itertools import combinations

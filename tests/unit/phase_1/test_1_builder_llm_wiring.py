@@ -1,9 +1,6 @@
 """Câblage builders -> LLM (settings, DOM builders, LLMFactory).
 
-Déplacé de tests/integration/ (audit N2) : le LLM est entièrement mocké
-(mock_llm_client -> MockLLMClient, jamais Ollama/vLLM réel) — un test dans
-tests/integration/ qui mock le LLM n'est pas un vrai test d'intégration,
-peu importe son nom ou son dossier d'origine (voir CLAUDE.md)."""
+"""
 
 import pytest
 

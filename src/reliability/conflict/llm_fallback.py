@@ -1,21 +1,5 @@
 """LLMFallbackDetector — détection de conflits textuels par prompt binaire via
 le LLM local (spec §8b, méthode "llm_fallback").
-
-Décision actée avec l'utilisateur (2026-08-06) : pas de modèle NLI dédié pour
-l'instant (évite le protocole de validation à 50 paires annotées + le
-téléchargement d'un nouveau modèle). Le LLM local sert de méthode
-*principale*, pas seulement de repli, renforcé par deux mesures issues de la
-littérature (voir recherche menée dans la conversation — MiniCheck/EMNLP 2024,
-auto-cohérence LLM/arXiv 2504.00180) :
-1. Justification obligatoire (`explanation`) plutôt qu'un simple oui/non — un
-   verdict qui doit citer les deux passages est moins sujet au bruit qu'un
-   verdict isolé.
-2. Auto-cohérence : plusieurs échantillons à températures variées, verdict
-   par vote majoritaire — réduit la variance sans télécharger de modèle NLI.
-
-MiniCheck-RoBERTa reste une piste pour plus tard si l'évaluation Phase 5
-(taux de faux conflits / conflits manqués) montre que cette méthode ne
-suffit pas.
 """
 
 from typing import Literal

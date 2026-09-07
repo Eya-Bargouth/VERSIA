@@ -12,7 +12,7 @@ déduite sans risque réel de mal ordonner les versions (ex. tri alphabétique
 qui classerait "v10" avant "v9" — voir discussion de session) — contrairement
 à tout le reste du manifeste, ce n'est pas une simplification sûre à
 automatiser. Cette déclaration vit dans tests/fixtures/versioning/ (jamais
-dans raw/, en lecture seule — voir CLAUDE.md), un fichier par source
+dans raw/, en lecture seule), un fichier par source
 versionnée, nommé <source_id>.yaml.
 """
 

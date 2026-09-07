@@ -1,9 +1,5 @@
 """Tests unitaires — retry/backoff sur erreurs transitoires
-(scripts/run_baseline_generation.py::run_one_question_with_retry, audit #19).
-
-scripts/ n'est pas sur le pythonpath pytest (seul src/ l'est, voir
-pyproject.toml) — import direct par chemin de fichier, comme les scripts
-gèrent eux-mêmes leur sys.path (voir CLAUDE.md)."""
+"""
 
 import importlib.util
 import sys

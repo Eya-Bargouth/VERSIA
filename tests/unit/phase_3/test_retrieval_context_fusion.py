@@ -1,10 +1,5 @@
 """Tests unitaires — build_labelled_contexts (src/retrieval/context_fusion.py).
-
-Aucun test n'existait pour ce module avant Phase 5. Couvre en particulier
-l'expansion parent explicite via Qdrant (audit #15) : auparavant, un parent
-absent du lot de chunks retrouvés était silencieusement omis — l'expansion
-ne fonctionnait que par coïncidence, quand le parent faisait déjà partie du
-lot retourné par la recherche."""
+"""
 
 import pytest
 

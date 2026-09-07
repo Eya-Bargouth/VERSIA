@@ -7,10 +7,7 @@ distincts apparaissent réellement dans les résultats. Le LLM local
 (qwen2.5:7b-instruct) formule ensuite UNE question naturelle à partir des
 passages réellement retrouvés.
 
-Sortie : data/eval/questions_candidates_llm_review.jsonl — un CANDIDAT par
-thème confirmé, avec les passages sources inclus pour audit. Ne PAS fusionner
-directement dans questions_v1.jsonl : la spec (§9) exige un audit qualitatif
-manuel du jeu de test avant toute évaluation RAGAS automatique.
+Sortie : data/eval/questions_candidates_llm_review.jsonl .
 """
 
 import json

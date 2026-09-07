@@ -8,13 +8,6 @@ AbstentionGate.evaluate(), puis balaie threshold_low hors-ligne (aucun
 nouvel appel LLM) pour mesurer faux-positifs d'abstention vs abstention
 correcte à chaque seuil candidat.
 
-Attention métrique : maximiser l'exactitude brute favorise un seuil trop bas
-(le mécanisme d'abstention devient quasi inutile) car la classe in-corpus
-domine numériquement — voir docstring de src/reliability/abstention.py pour
-la calibration retenue (2026-08-14) et la justification du compromis choisi.
-
-Usage : --skip-collect pour ré-analyser des données déjà collectées
-(data/eval/abstention_calibration_raw.jsonl) sans refaire tourner le pipeline.
 """
 import argparse
 import json

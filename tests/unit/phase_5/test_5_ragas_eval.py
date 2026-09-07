@@ -1,5 +1,4 @@
-"""Tests unitaires — métriques façon RAGAS via juge LLM local (pas le
-package ragas, cassé dans cet environnement — voir src/evaluation/ragas_eval.py).
+"""Tests unitaires — métriques façon RAGAS via juge LLM local.
 
 Chaque métrique réplique l'algorithme réel de ragas (multi-étapes), donc les
 scripts de juge simulent plusieurs appels LLM successifs par métrique, pas un

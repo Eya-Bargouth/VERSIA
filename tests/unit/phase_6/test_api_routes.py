@@ -1,10 +1,6 @@
 """Tests unitaires des routes API Phase 6 — pipeline, run_ingestion() et
-Settings.check_services() mockés (BGE-M3, reranker, Qdrant, Ollama : les
-dépendances lourdes de CLAUDE.md), donc tests/unit/ et pas
-tests/integration/. Vérifient uniquement le câblage HTTP (schémas, cycle de
-vie des jobs /ingest, codes de statut) — le pipeline réel de bout en bout
-est déjà couvert par tests/integration/test_end_to_end_real.py et
-test_real_pipeline_phase2.py.
+Settings.check_services() mockés (BGE-M3, reranker, Qdrant, Ollama)
+
 """
 
 from types import SimpleNamespace

@@ -1,14 +1,3 @@
-"""Régression : le reranker doit réellement s'exécuter sur le chemin hybride
-quand le pool de candidats fusionnés dépasse top_k.
-
-Bug trouvé en testant la Phase 4 de bout en bout contre le vrai Qdrant :
-HybridRetriever._hybrid_search() tronquait `fused` à `top_k` avant de
-retourner, donc la condition `len(candidates) > top_k` dans retrieve() (qui
-déclenche le reranking) n'était jamais vraie sur le chemin hybride — le
-reranker ne s'exécutait donc jamais en pratique via HybridRetriever, malgré
-les benchmarks scripts/measure_e2e_latency.py qui l'appellent en direct et
-masquaient le problème."""
-
 from uuid import uuid4
 
 import numpy as np

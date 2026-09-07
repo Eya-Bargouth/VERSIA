@@ -2,18 +2,6 @@
 """Calcule les diffs entre toutes les paires de versions de chaque source
 versionnée découverte automatiquement sous raw_dir, et les persiste dans
 data/diffs/ via VersionDiffEngine.
-
-Générique par construction : découvre toutes les sources dont un override de
-versioning existe (voir tests/fixtures/versioning/<source_id>.yaml — jamais
-dans raw/, en lecture seule), peu importe le format (yaml/json/markdown/pdf)
-ou le source_id. Ajouter une nouvelle source versionnée ne demande aucune
-modification de ce script — seulement un fichier
-tests/fixtures/versioning/<source_id>.yaml déclarant `pattern`/`order`.
-
-Les builders DOM peuplent DOMNode.version_tag/version_order depuis
-SourceConfig.version_pattern au moment du build() (AbstractDOMBuilder.
-_create_root_node) : ce script se contente de construire l'arbre et de lire
-le tag qui en résulte, plus besoin de le dériver lui-même.
 """
 import argparse
 import sys

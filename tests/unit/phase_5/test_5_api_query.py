@@ -1,11 +1,5 @@
 """Tests unitaires — route POST /query (spec §10, audit N1).
-
-QueryPipeline était déjà entièrement écrit et testé (phase_4) mais n'avait
-jamais de point d'appel HTTP réel — src/api/routes/query.py restait un
-placeholder ("TODO: Phase 4 - implémenter"). Vérifie ici uniquement le
-câblage HTTP (requête -> pipeline.answer() -> réponse), avec un
-QueryPipeline factice injecté via l'override de dépendance FastAPI standard
-— pas de composants réels (Qdrant/BGE-M3/Ollama), c'est un test unitaire."""
+"""
 
 from uuid import uuid4
 

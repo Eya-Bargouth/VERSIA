@@ -1,15 +1,5 @@
 """Test d'intégration bout-en-bout réel — Qdrant persistant + BGE-M3 réel +
 BGE-Reranker réel + Ollama réel, ensemble (audit N3).
-
-Gap comblé : chaque composant avait déjà sa propre couverture d'intégration
-isolée (retrieval seul dans test_retrieval_hybrid_phase3.py, ingestion seule
-dans test_real_pipeline_phase2.py), mais aucun test ne faisait tourner la
-chaîne complète retrieve -> sufficiency -> generate -> abstain avec un vrai
-LLM Ollama — le seul endroit qui exerçait vraiment QueryPipeline.answer()
-avec des composants 100% réels était un script (run_baseline_generation.py),
-jamais un test. Ignoré (pytest.skip) si Qdrant/Ollama ne sont pas
-accessibles plutôt que d'échouer bruyamment en environnement CI sans ces
-services.
 """
 
 import os

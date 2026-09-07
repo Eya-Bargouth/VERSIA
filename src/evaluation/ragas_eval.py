@@ -1,43 +1,6 @@
 """Métriques qualité génération façon RAGAS — Faithfulness, Answer Relevancy,
 Context Precision, Context Recall.
 
-Implémentées directement via le LLM juge local (BaseLLMClient, sortie JSON
-contrainte) plutôt que la librairie `ragas` : le paquet (0.4.3, dernière
-version dispo) a une chaîne d'import cassée dans cet environnement
-(`ragas.llms.base` importe `ChatVertexAI` depuis un module absent de
-langchain-community, reproduit à l'identique lors d'une réinstallation à
-neuf) — décision actée avec l'utilisateur d'implémenter ces métriques
-nous-mêmes plutôt que de réparer la dépendance, cohérent avec l'invariant
-"pas d'API payante, tout accès LLM passe par BaseLLMClient".
-
-Les algorithmes ci-dessous répliquent fidèlement la méthode réelle de ragas
-(lue directement dans `ragas/metrics/_faithfulness.py`,
-`_answer_relevance.py`, `_context_precision.py`, `_context_recall.py` du
-paquet installé) plutôt qu'un jugement LLM holistique portant le même nom :
-
-- Faithfulness : décomposition de la réponse en affirmations atomiques
-  (claims), puis vérification NLI de chaque claim contre le contexte —
-  score = proportion de claims vérifiées. PAS un seul jugement global.
-- Answer Relevancy : génération de questions synthétiques à partir de la
-  réponse, puis similarité cosinus (embeddings, pas jugement LLM) entre la
-  question originale et les questions générées — pénalisé si la réponse est
-  évasive ("noncommittal"). Réutilise l'embedder BGE-M3 déjà chargé pour
-  l'indexation, pas de nouvelle dépendance d'embedding.
-- Context Precision : Average Precision pondérée par le rang, sur des
-  verdicts LLM d'utilité de chaque chunk *vis-à-vis d'une réponse donnée*
-  (`expected_answer` si disponible, sinon la réponse générée) — pas une
-  pertinence de passage jugée dans l'absolu.
-- Context Recall : classification phrase par phrase de la réponse de
-  référence, attribuée ou non au contexte retrouvé — pas un score global.
-
-Simplification assumée par rapport à ragas : un seul appel LLM par étape
-(pas d'auto-ensembling multi-échantillons ni de génération multi-appels des
-questions synthétiques) — le juge tourne en local sur CPU (qwen2.5:7b),
-répliquer l'ensembling de ragas multiplierait le coût sans changer la
-formule de score. Documenté ici plutôt que fait silencieusement.
-
-Modèle juge recommandé : qwen2.5:7b-instruct, forcé CPU (num_gpu=0) pour
-éviter toute contention VRAM avec le pipeline évalué — voir docs/PHASE_4_SUMMARY.md §4.6.
 """
 
 from __future__ import annotations

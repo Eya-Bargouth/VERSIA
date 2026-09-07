@@ -1,5 +1,4 @@
-"""Tests unitaires — Citation Accuracy et Sufficiency Precision (spec §15.3,
-audit #20)."""
+"""Tests unitaires — Citation Accuracy et Sufficiency Precision """
 
 import json
 
